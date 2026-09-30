@@ -1,0 +1,79 @@
+# Scalo — self-hosting in one command (see docs/self-hosting.md).
+#
+#   cp .env.example .env            # set SCALO_DOMAIN, JWT_SECRET, POSTGRES_PASSWORD (or: ./scripts/generate-secrets.sh --write)
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# app    API + worker + built web app (one container, image built from ./Dockerfile)
+# db     PostgreSQL 16
+# caddy  HTTPS: automatic certificate for SCALO_DOMAIN, on-demand certificates for verified custom domains
+#
+# docker-compose.yml (without .prod) is the development file: it only starts PostgreSQL.
+name: scalo
+
+services:
+  app:
+    build: .
+    image: scalo:local
+    restart: unless-stopped
+    init: true
+    depends_on:
+      db:
+        condition: service_healthy
+    # every variable of .env reaches the application (SMTP-independent options, AI key, license key, ALLOW_SIGNUPS…);
+    # the values below always win over .env
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      API_PORT: "4000"
+      DATABASE_URL: postgres://scalo:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/scalo
+      PUBLIC_URL: ${SCALO_PUBLIC_URL:-https://${SCALO_DOMAIN:?Set SCALO_DOMAIN in .env}}
+      # pending migrations are applied at startup (Kysely takes a lock: safe with several instances)
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
+      # exactly one proxy (caddy) sits in front of the app: req.ip is the real client address
+      TRUST_PROXY: "1"
+      # `app` is the name Caddy uses to reach the API on the internal network (on-demand TLS check)
+      APP_HOSTS: app,${APP_HOSTS:-}
+      UPLOAD_DIR: /data/uploads
+      WEB_DIST: /app/web/dist
+    volumes:
+      - uploads:/data/uploads
+    expose:
+      - "4000"
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scalo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: scalo
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scalo -d scalo"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      SCALO_DOMAIN: ${SCALO_DOMAIN:?Set SCALO_DOMAIN in .env}
+    ports:
+      - "${SCALO_HTTP_PORT:-80}:80"
+      - "${SCALO_HTTPS_PORT:-443}:443"
+      - "${SCALO_HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  uploads:
+  caddy_data:
+  caddy_config:

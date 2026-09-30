@@ -1,0 +1,84 @@
+DRAFT — to be reviewed by a lawyer before publication
+
+Scalo Enterprise License (the "Enterprise License")
+Copyright (c) 2026 Scalo ("Scalo", the "Licensor")
+
+This license applies only to the software and associated files located in the
+`ee/` directory of the Scalo repository (the "Enterprise Software"). Everything
+outside the `ee/` directory is licensed under the GNU Affero General Public
+License, version 3 (AGPL-3.0), as stated in the `LICENSE` file at the root of
+the repository. Third-party components keep their own licenses.
+
+1. Production use requires a subscription
+
+   You may use the Enterprise Software in production only if you (or the
+   organization you act for) hold a valid Scalo Enterprise subscription and a
+   valid license key issued by the Licensor for the correct number of seats,
+   and only for as long as that subscription is in force and you comply with
+   its terms (the "Subscription Terms").
+
+2. Development and testing
+
+   Without a subscription, you may copy, read and modify the Enterprise
+   Software for the sole purposes of development, testing and evaluation, in
+   non-production environments that do not process real end-customer data.
+   You may not rely on this section to offer the Enterprise Software, or any
+   feature of it, to third parties.
+
+3. Modifications
+
+   You may modify the Enterprise Software. All modifications and patches
+   remain subject to this Enterprise License. If you choose to send a
+   modification to the Licensor (for instance as a pull request), you do so
+   under the project's Contributor License Agreement (`CLA.md`).
+
+4. Restrictions
+
+   You may not, and may not allow anyone else to:
+   (a) use the Enterprise Software in production without a valid subscription
+       and license key;
+   (b) remove, disable or circumvent the license-key verification or any
+       other technical limitation of the Enterprise Software, or alter it so
+       that Enterprise features run without a valid license key, except as
+       needed for the development and testing allowed in section 2;
+   (c) sell, rent, sublicense, host or otherwise provide the Enterprise
+       Software to third parties as a product or service, except as expressly
+       permitted by your Subscription Terms;
+   (d) copy the Enterprise Software, in whole or in part, into another
+       product, or distribute it separately from the Scalo repository;
+   (e) remove or alter any license, copyright or other notice of the Licensor.
+
+5. Ownership
+
+   The Licensor and its licensors retain all right, title and interest in the
+   Enterprise Software, including in modifications, subject to the rights of
+   contributors under the Contributor License Agreement. No rights are granted
+   other than those expressly stated in this Enterprise License. No trademark
+   license is granted.
+
+6. Termination
+
+   Your rights under this Enterprise License end automatically if you breach
+   it, or when your subscription ends as far as production use is concerned.
+   On termination you must stop using the Enterprise Software in production.
+   Your data, and the AGPL-3.0 parts of Scalo, are not affected: the
+   Enterprise Software is designed so that Scalo keeps running without it.
+
+7. No warranty, limitation of liability
+
+   THE ENTERPRISE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+   EXCEPT AS OTHERWISE AGREED IN YOUR SUBSCRIPTION TERMS, AND TO THE EXTENT
+   PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE LICENSOR OR THE
+   COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+   WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+   OR IN CONNECTION WITH THE ENTERPRISE SOFTWARE OR ITS USE.
+
+8. Precedence
+
+   If you have signed Subscription Terms with the Licensor, they prevail over
+   this Enterprise License in case of conflict.
+
+To obtain a subscription or ask a question about this license:
+[CONTACT — to be filled in before publication]

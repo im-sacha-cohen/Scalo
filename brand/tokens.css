@@ -1,0 +1,43 @@
+/* Scalo design tokens — prêt pour Tailwind v4 (@theme) */
+@theme {
+  --color-indigo-50: #F6F5FF;
+  --color-indigo-100: #ECEAFF;
+  --color-indigo-200: #D6D1FF;
+  --color-indigo-300: #B3A9FF;
+  --color-indigo-400: #8A7CFF;
+  --color-indigo-500: #5B4BFF;
+  --color-indigo-600: #4A38E8;
+  --color-indigo-700: #3A2BC0;
+  --color-indigo-800: #2A1F8C;
+  --color-indigo-900: #1A1458;
+  --color-indigo-950: #0E0B2B;
+
+  --color-lime-100: #F2FDD0;
+  --color-lime-400: #C6F432;
+  --color-lime-700: #5C7A0B;
+
+  --color-neutral-50: #FAFAFC;
+  --color-neutral-200: #E4E3EC;
+  --color-neutral-500: #8B89A0;
+  --color-neutral-800: #3B3950;
+
+  --color-success: #12B76A;
+  --color-warning: #F79009;
+  --color-error: #F04438;
+  --color-info: #2E90FA;
+
+  --color-brand: var(--color-indigo-500);
+  --color-brand-hover: var(--color-indigo-600);
+  --color-ink: var(--color-indigo-950);
+  --color-accent: var(--color-lime-400);
+  --color-surface: var(--color-indigo-50);
+
+  --font-display: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+}

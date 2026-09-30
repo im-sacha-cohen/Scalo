@@ -1,0 +1,18 @@
+node_modules
+dist
+*.db
+*.db-*
+.env
+.env.*
+!.env.example
+api/uploads
+# self-hosting: backups (database dumps, uploads archives)
+backups/
+*.dump
+# private keys (license signing keys, TLS…) never belong in the repository
+*.pem
+*.key
+*.p12
+.DS_Store
+*.log
+.claude/worktrees/

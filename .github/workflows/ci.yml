@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck, tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: scalo
+          POSTGRES_PASSWORD: scalo_ci_password
+          POSTGRES_DB: scalo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U scalo -d scalo"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://scalo:scalo_ci_password@localhost:5432/scalo
+      # created automatically by the test harness, emptied at every run
+      TEST_DATABASE_URL: postgres://scalo:scalo_ci_password@localhost:5432/scalo_test
+      JWT_SECRET: ci-only-secret-not-used-anywhere-else-0123456789
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck (core)
+        run: npm run typecheck
+      - name: Typecheck (ee/)
+        run: npm run typecheck:ee
+      - name: Tests (core)
+        run: npm test
+      - name: Tests (ee/)
+        run: npm run test:ee
+      - name: Core without ee/ (typecheck + tests)
+        run: npm run check:core
+      - name: Build the web app
+        run: npm run build
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build (not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: scalo:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Validate the compose file
+        run: cp .env.example .env && docker compose -f docker-compose.prod.yml config --quiet
+        env:
+          SCALO_DOMAIN: ci.example.com
+          POSTGRES_PASSWORD: ci
+      - name: Smoke test (image + PostgreSQL, without the reverse proxy)
+        run: |
+          docker network create scalo-ci
+          docker run -d --name db --network scalo-ci -e POSTGRES_USER=scalo -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=scalo postgres:16-alpine
+          for i in $(seq 1 30); do docker exec db pg_isready -U scalo -d scalo && break; sleep 2; done
+          docker run -d --name app --network scalo-ci -p 4000:4000 \
+            -e DATABASE_URL=postgres://scalo:ci@db:5432/scalo \
+            -e JWT_SECRET=ci-only-secret-not-used-anywhere-else-0123456789 \
+            -e PUBLIC_URL=http://localhost:4000 -e AUTO_MIGRATE=true scalo:ci
+          for i in $(seq 1 30); do curl -fsS http://localhost:4000/api/health && break; sleep 2; done
+          curl -fsS http://localhost:4000/api/health
+          curl -fsS http://localhost:4000/login | grep -qi '<div id="root"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:4000/p/unknown)" = 404
+      - name: Logs
+        if: failure()
+        run: docker logs app || true

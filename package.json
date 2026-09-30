@@ -1,0 +1,27 @@
+{
+  "name": "scalo",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "api",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,magenta \"npm run dev -w api\" \"npm run dev -w web\"",
+    "build": "npm run build -w web",
+    "db:up": "docker compose up -d --wait db",
+    "db:down": "docker compose stop db",
+    "migrate": "npm run migrate -w api",
+    "migrate:down": "npm run migrate:down -w api",
+    "seed": "npm run seed -w api --",
+    "test": "npm test -w api",
+    "test:ee": "cd api && NODE_ENV=test node --import tsx --test --test-concurrency=1 --test-reporter=spec ../ee/api/test/*.test.ts",
+    "typecheck:ee": "tsc --noEmit -p ee/api && tsc --noEmit -p ee/web",
+    "check:core": "node scripts/check-core.mjs",
+    "ee:license": "tsx ee/scripts/issue-license.ts",
+    "typecheck": "npm run typecheck -w api && tsc --noEmit -p web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.4"
+  }
+}

@@ -1,0 +1,58 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. **Security issues must not be reported here**: see [SECURITY.md](https://github.com/im-sacha-cohen/Scalo/blob/main/SECURITY.md).
+        Remove secrets, API keys and personal data (contact emails…) from anything you paste.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to …
+        2. Click on …
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Commit hash or release (`git rev-parse --short HEAD`).
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How do you run Scalo?
+      options:
+        - Docker (docker-compose.prod.yml)
+        - Development (npm run dev)
+        - Other (describe below)
+    validations:
+      required: true
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition
+      options:
+        - Community (AGPL-3.0)
+        - Enterprise (ee/)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, screenshots, environment
+      description: Relevant lines of `docker compose logs app`, browser and OS, reverse proxy, PostgreSQL version.
+      render: text

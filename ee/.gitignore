@@ -1,0 +1,4 @@
+# License signing keys must never be committed (see ee/README.md)
+*.pem
+*.key
+license-private-key*

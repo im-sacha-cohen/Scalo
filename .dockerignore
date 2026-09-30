@@ -1,0 +1,28 @@
+# Build context of the production image (Dockerfile). Secrets, local data and everything the image does not need.
+.git
+.github
+.claude
+**/node_modules
+**/dist
+.env
+.env.*
+!.env.example
+**/*.pem
+**/*.key
+api/uploads
+backups
+*.db
+*.db-*
+*.log
+
+# not needed in the image
+docs
+brand
+deploy
+scripts
+api/test
+ee/api/test
+Dockerfile
+.dockerignore
+docker-compose*.yml
+*.md

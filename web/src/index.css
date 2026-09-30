@@ -1,0 +1,129 @@
+@import "tailwindcss";
+/* Enterprise edition screens live outside web/ (optional directory: no-op when it does not exist) */
+@source "../../ee/web/src";
+
+@theme {
+  /* Scalo brand — see brand/BRAND.md. brand-500 is the logo indigo, brand-950 the "ink". */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-brand-50: #f6f5ff;
+  --color-brand-100: #eceaff;
+  --color-brand-200: #d6d1ff;
+  --color-brand-300: #b3a9ff;
+  --color-brand-400: #8a7cff;
+  --color-brand-500: #5b4bff;
+  --color-brand-600: #4a38e8;
+  --color-brand-700: #3a2bc0;
+  --color-brand-800: #2a1f8c;
+  --color-brand-900: #1a1458;
+  --color-brand-950: #0e0b2b;
+  --color-ink: #0e0b2b;
+  /* Signature accent: never as text on a light background. */
+  --color-lime-100: #f2fdd0;
+  --color-lime-400: #c6f432;
+  --color-lime-700: #5c7a0b;
+  --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.04);
+  --shadow-pop: 0 12px 32px -12px rgb(15 23 42 / 0.22), 0 2px 6px -2px rgb(15 23 42 / 0.08), 0 0 0 1px rgb(15 23 42 / 0.05);
+  --shadow-float: 0 4px 16px -4px rgb(15 23 42 / 0.14), 0 0 0 1px rgb(15 23 42 / 0.06);
+  --animate-fade-in: fade-in 0.15s ease-out;
+  --animate-pop-in: pop-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-slide-in: slide-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-stripes: stripes 0.8s linear infinite;
+  --animate-slide-in-left: slide-in-left 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes pop-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.98); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes stripes {
+    from { background-position: 0 0; }
+    to { background-position: 16px 0; }
+  }
+  @keyframes slide-in-left {
+    from { opacity: 0; transform: translateX(-12px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes slide-in {
+    from { opacity: 0; transform: translateX(12px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-brand-50 text-slate-900 antialiased;
+  }
+  /* App headings use the brand display face; pages being edited in the builder keep their own fonts. */
+  :where(h1, h2):not(.scalo-canvas *) { font-family: var(--font-display); letter-spacing: -0.02em; }
+  :focus-visible { outline-color: var(--color-brand-500); }
+  button:not(:disabled), [role="button"]:not([aria-disabled="true"]) { cursor: pointer; }
+}
+
+/* ---------- Builder canvas ----------
+   Blocks are rendered by @scalo/shared with inline styles. Tailwind's preflight resets a few
+   elements that the renderer relies on the browser defaults for — restore them here. */
+.scalo-canvas strong, .scalo-canvas b { font-weight: 700; }
+.scalo-canvas em, .scalo-canvas i { font-style: italic; }
+.scalo-canvas a { cursor: default; }
+.scalo-canvas input::placeholder { color: #94a3b8; opacity: 1; }
+.scalo-canvas input:disabled, .scalo-canvas button:disabled { cursor: default; opacity: 1; }
+.scalo-canvas img { display: inline-block; }
+
+/* thin scrollbars inside panels */
+.scalo-scroll { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+.scalo-scroll-dark { scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+
+/* range inputs */
+input[type="range"].scalo-range {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 999px;
+  background: #e2e8f0; outline: none;
+}
+input[type="range"].scalo-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 999px;
+  background: #fff; border: 2px solid var(--color-brand-600); box-shadow: 0 1px 3px rgb(0 0 0 / 0.2); cursor: pointer;
+}
+input[type="range"].scalo-range::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 999px; background: #fff; border: 2px solid var(--color-brand-600); cursor: pointer;
+}
+input[type="color"].scalo-color { -webkit-appearance: none; appearance: none; padding: 0; border: 0; background: none; }
+input[type="color"].scalo-color::-webkit-color-swatch-wrapper { padding: 0; }
+input[type="color"].scalo-color::-webkit-color-swatch { border: 0; border-radius: 6px; }
+input[type="color"].scalo-color::-moz-color-swatch { border: 0; border-radius: 6px; }
+
+/* moving diagonal stripes (emails being sent right now) */
+.scalo-stripes {
+  background-image: linear-gradient(45deg, rgb(255 255 255 / 0.35) 25%, transparent 25%, transparent 50%, rgb(255 255 255 / 0.35) 50%, rgb(255 255 255 / 0.35) 75%, transparent 75%, transparent);
+  background-size: 16px 16px;
+}
+
+/* keyboard key cap */
+.scalo-kbd {
+  display: inline-flex; min-width: 20px; height: 20px; align-items: center; justify-content: center; padding: 0 5px;
+  border-radius: 5px; border: 1px solid #e2e8f0; border-bottom-width: 2px; background: #fff;
+  font-size: 11px; font-weight: 500; color: #475569; font-family: var(--font-sans); line-height: 1;
+}
+
+/* ---------- Landing page (pages/landing) ---------- */
+@keyframes landing-rise {
+  from { opacity: 0; transform: translateY(28px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes landing-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.landing-rise { animation: landing-rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.landing-float { animation: landing-rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both, landing-float 5s ease-in-out 1.6s infinite; }
+.landing-reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.6s ease-out, transform 0.7s cubic-bezier(0.16, 1, 0.3, 1); }
+.landing-reveal.is-visible { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .landing-rise, .landing-float { animation: none; }
+  .landing-reveal { opacity: 1; transform: none; transition: none; }
+}
+html:has(.landing-root) { scroll-behavior: smooth; }

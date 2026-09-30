@@ -1,0 +1,36 @@
+# Reverse proxy of a self-hosted Scalo instance (docker-compose.prod.yml).
+# Everything goes to the single `app` container: it serves the API, the public pages and the web app, and routes
+# custom domains itself from the Host header (which Caddy forwards unchanged, along with X-Forwarded-For/-Proto/-Host
+# that it sets itself — client-supplied values are discarded).
+{
+	# Certificates for custom domains are only issued for domains verified in Scalo (200), never for an arbitrary
+	# host name pointed at the server (404).
+	on_demand_tls {
+		ask http://app:4000/api/domains/allowed
+	}
+}
+
+(scalo) {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		# defaults only: the application sets stricter values where needed (OAuth consent, share links…)
+		?Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+	reverse_proxy app:4000
+}
+
+# The application itself: automatic HTTPS (Let's Encrypt) and HTTP → HTTPS redirect.
+{$SCALO_DOMAIN} {
+	import scalo
+}
+
+# Any other host = a custom domain of a funnel: certificate obtained on demand at the first visit.
+https:// {
+	tls {
+		on_demand
+	}
+	import scalo
+}
