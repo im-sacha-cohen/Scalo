@@ -11,3 +11,4 @@ export * from './edition';
 export * from './courses';
 export * from './imports';
 export * from './affiliates';
+export * from './onboarding';

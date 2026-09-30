@@ -32,6 +32,7 @@ Cœur sous licence [AGPL-3.0](LICENSE), sans limite de contacts, d’emails ni d
 | **Serveur MCP** | Claude, ou tout client MCP, agit sur vos contacts, tunnels et campagnes | [docs/ai-mcp.md](docs/ai-mcp.md) |
 | **API publique et OAuth 2.0** | API `/api/v1`, serveur d’autorisation OAuth 2.0 (PKCE, rotation des jetons) pour les applications tierces, webhooks | [docs/api-oauth.md](docs/api-oauth.md) |
 | **Migration** | assistant d’import des contacts (clé API ou CSV) et reprise de pages par URL | [docs/migration.md](docs/migration.md) |
+| **Mise en route** | parcours de bienvenue des nouveaux comptes (objectif, expéditeur, premier tunnel publié en quelques minutes) et liste « Bien démarrer » calculée sur les données réelles | [SPEC.md](SPEC.md) |
 | **Auto-hébergement** | image Docker, PostgreSQL, HTTPS automatique, sauvegarde et restauration | [docs/self-hosting.md](docs/self-hosting.md) |
 
 ## Démarrage rapide : auto-hébergement avec Docker

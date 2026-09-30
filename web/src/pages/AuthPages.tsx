@@ -168,7 +168,8 @@ export function RegisterPage() {
     setLoading(true);
     try {
       await register(name.trim(), email.trim(), password);
-      navigate(next ?? '/dashboard', { replace: true });
+      // a new account starts with the welcome flow (unless it came for something precise, e.g. an OAuth consent)
+      navigate(next ?? '/welcome', { replace: true });
     } catch (err) {
       setError((err as Error).message);
     } finally {

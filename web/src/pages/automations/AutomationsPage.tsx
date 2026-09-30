@@ -73,8 +73,8 @@ function RulesList({ onCreate }: { onCreate: () => void }) {
     return (
       <EmptyState
         icon={Zap}
-        title="Aucune automatisation"
-        description="Exemple : quand un contact achète « Formation », ajouter le tag « client » et l’inscrire à la campagne d’accueil."
+        title="Laissez Scalo faire les gestes répétitifs"
+        description="Une automatisation réagit à un événement et enchaîne les actions à votre place. Par exemple : quand un contact achète « Formation », ajouter le tag « client » et l’inscrire à la campagne d’accueil."
         action={
           <Button icon={Plus} onClick={onCreate}>
             Créer une automatisation

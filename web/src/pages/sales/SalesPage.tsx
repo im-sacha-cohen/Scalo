@@ -166,7 +166,18 @@ function OrdersTab() {
           icon={ShoppingCart}
           className="m-4 border-0"
           title={filtered ? 'Aucune commande ne correspond' : 'Aucune commande pour l’instant'}
-          description={filtered ? 'Modifiez les filtres pour élargir la recherche.' : 'Ajoutez un bloc « Paiement » à une étape de tunnel : les commandes apparaîtront ici dès le premier achat.'}
+          description={
+            filtered
+              ? 'Modifiez les filtres pour élargir la recherche.'
+              : 'Chaque achat fait sur vos pages arrive ici, avec son paiement et son client. Pour vendre : créez un produit, puis ajoutez un bloc « Paiement » à une étape de tunnel.'
+          }
+          action={
+            filtered ? undefined : (
+              <Button icon={Plus} onClick={() => navigate('/sales?tab=products')}>
+                Créer un produit
+              </Button>
+            )
+          }
         />
       ) : (
         <div className="overflow-x-auto">

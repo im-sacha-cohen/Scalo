@@ -12,6 +12,7 @@ import * as m0007 from './migrations/0007_payments';
 import * as m0008 from './migrations/0008_courses';
 import * as m0009 from './migrations/0009_ai';
 import * as m0012 from './migrations/0012_affiliates';
+import * as m0013 from './migrations/0013_onboarding';
 
 /**
  * Versioned migrations. Static provider (no filesystem scanning) so it works the same under tsx, a bundler or plain
@@ -31,6 +32,7 @@ const migrations: Record<string, Migration> = {
   '0010_imports': m0010,
   '0011_ee': m0011,
   '0012_affiliates': m0012,
+  '0013_onboarding': m0013,
 };
 
 const provider: MigrationProvider = { getMigrations: async () => migrations };

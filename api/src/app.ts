@@ -36,6 +36,7 @@ import { createMcpRouter } from './routes/mcp';
 import type { AiOptions } from './services/ai';
 import { editionGate, editionPublicGate } from './routes/edition';
 import { createSpaRouter } from './routes/spa';
+import { onboardingRouter } from './routes/onboarding';
 
 /** Postgres errors that reach the error handler (the routes handle the expected ones with specific messages). */
 function pgErrorStatus(e: unknown): { status: number; error: string } | null {
@@ -124,6 +125,7 @@ export function createApp(opts: AppOptions = {}) {
     importsRouter,
     coursesRouter,
     affiliatesRouter, // affiliate program: /affiliation/…
+    onboardingRouter, // welcome flow + "Bien démarrer" checklist: /onboarding
   );
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'Route introuvable' });

@@ -8,6 +8,7 @@ import { checkDb, closeDb, db, truncateAll } from './db';
 import { migrateToLatest } from './db/migrate';
 import { addTag, getOrCreateTag, logEvent, upsertContact } from './services/contacts';
 import { requestOptin } from './services/optin';
+import { markOnboardingDone } from './services/onboarding';
 import { createFunnel } from './routes/funnels';
 import { EmailWorker } from './worker';
 
@@ -56,6 +57,8 @@ async function main() {
         company_address: 'Business Facile SAS — 12 rue de la Paix, 75002 Paris, France',
       })
       .execute();
+    // the demo account is not a new sign-up: no welcome flow, no "Bien démarrer" checklist
+    await markOnboardingDone(userId, trx);
 
     const lead = await getOrCreateTag(userId, 'lead', trx);
     const client = await getOrCreateTag(userId, 'client', trx);

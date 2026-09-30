@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
-import { Blocks, Funnel, GraduationCap, HandCoins, LayoutDashboard, LogOut, Mail, Menu, Settings, ShoppingBag, Users, X, ChevronsUpDown, Zap, type LucideIcon } from 'lucide-react';
+import { Blocks, Funnel, GraduationCap, HandCoins, LayoutDashboard, ListChecks, LogOut, Mail, Menu, Settings, ShoppingBag, Users, X, ChevronsUpDown, Zap, type LucideIcon } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { useEdition } from '../lib/edition';
 import { eeWeb } from '../lib/ee';
 import { initials } from '../lib/format';
+import { onboardingApi } from '../lib/onboarding-api';
 import { Avatar, cx } from './ui';
 
 const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
@@ -78,6 +79,19 @@ function UserMenu() {
             className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-slate-700 hover:bg-slate-100"
           >
             <Settings size={15} className="text-slate-500" /> Paramètres
+          </button>
+          <button
+            onClick={() => {
+              setOpen(false);
+              // reopens the "Bien démarrer" checklist if it was hidden (a read-only member simply sees it)
+              onboardingApi
+                .update({ checklist_hidden: false })
+                .catch(() => undefined)
+                .then(() => navigate('/dashboard?guide=1'));
+            }}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-slate-700 hover:bg-slate-100"
+          >
+            <ListChecks size={15} className="text-slate-500" /> Bien démarrer
           </button>
           <button
             onClick={() => {

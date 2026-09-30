@@ -127,3 +127,50 @@ input[type="color"].scalo-color::-moz-color-swatch { border: 0; border-radius: 6
   .landing-reveal { opacity: 1; transform: none; transition: none; }
 }
 html:has(.landing-root) { scroll-behavior: smooth; }
+
+/* ---------- Onboarding (pages/onboarding) ----------
+   Step content enters child by child, from the side the user is moving to; the pills of the "stairs" settle one
+   after the other; the online dot breathes. Everything is switched off by prefers-reduced-motion. */
+@keyframes onb-in {
+  from { opacity: 0; transform: translate3d(var(--onb-dx, 0), var(--onb-dy, 14px), 0); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes onb-pill {
+  0% { opacity: 0; transform: translate3d(-18px, 10px, 0) scale(0.96); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes onb-ping {
+  0% { transform: scale(1); opacity: 0.55; }
+  80%, 100% { transform: scale(2.6); opacity: 0; }
+}
+@keyframes onb-build {
+  0%, 100% { opacity: 0.28; }
+  40% { opacity: 1; }
+}
+@keyframes onb-check {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: 0; }
+}
+.onb-step > * { animation: onb-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.onb-step[data-dir="forward"] { --onb-dx: 22px; --onb-dy: 0px; }
+.onb-step[data-dir="back"] { --onb-dx: -22px; --onb-dy: 0px; }
+.onb-step > *:nth-child(2) { animation-delay: 50ms; }
+.onb-step > *:nth-child(3) { animation-delay: 100ms; }
+.onb-step > *:nth-child(4) { animation-delay: 150ms; }
+.onb-step > *:nth-child(5) { animation-delay: 200ms; }
+.onb-step > *:nth-child(n + 6) { animation-delay: 250ms; }
+.onb-pill { animation: onb-pill 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.onb-ping { animation: onb-ping 2.2s cubic-bezier(0, 0, 0.2, 1) infinite; }
+.onb-build { animation: onb-build 1.8s ease-in-out infinite; }
+.onb-check { stroke-dasharray: 24; animation: onb-check 0.45s 0.25s cubic-bezier(0.65, 0, 0.35, 1) both; }
+@keyframes onb-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.onb-fade { animation: onb-fade 0.4s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .onb-step > *, .onb-pill, .onb-ping, .onb-build, .onb-check, .onb-fade { animation: none; }
+  .onb-ping { display: none; }
+  .onb-build { opacity: 1; }
+  .onb-motion { transition: none !important; }
+}

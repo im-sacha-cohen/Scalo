@@ -33,6 +33,7 @@ import { SharePage } from './pages/funnels/growth/SharePage';
 import { CoursesPage } from './pages/courses/CoursesPage';
 import { CourseDetailPage } from './pages/courses/CourseDetail';
 import { LessonEditorPage } from './pages/courses/LessonEditor';
+import { WelcomePage } from './pages/onboarding/WelcomePage';
 
 function FullScreenLoader() {
   return (
@@ -80,6 +81,8 @@ const router = createBrowserRouter([
     children: [
       // OAuth consent screen (authorization server): full screen, login required
       { path: '/oauth/consent', element: <ConsentPage /> },
+      // welcome flow of a new account: full screen, the dashboard sends there until it is finished or skipped
+      { path: '/welcome', element: <WelcomePage /> },
       // full-screen editors (no sidebar)
       { path: '/funnels/:id/steps/:stepId/edit', element: <StepEditorPage /> },
       { path: '/emails/broadcasts/:id', element: <BroadcastPage /> },

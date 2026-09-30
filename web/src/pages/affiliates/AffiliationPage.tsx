@@ -165,7 +165,18 @@ function AffiliatesTab({ onChange }: { onChange: () => void }) {
             icon={Users}
             className="m-4 border-0"
             title={status || q ? 'Aucun affilié ne correspond' : 'Aucun affilié pour l’instant'}
-            description={status || q ? 'Modifiez les filtres pour élargir la recherche.' : 'Ajoutez un affilié à la main ou partagez l’adresse de votre espace affilié (onglet Réglages) pour recevoir des inscriptions.'}
+            description={
+              status || q
+                ? 'Modifiez les filtres pour élargir la recherche.'
+                : 'Vos affiliés recommandent vos offres et touchent une commission sur chaque vente qu’ils apportent. Ajoutez le premier à la main, ou partagez l’adresse de votre espace affilié (onglet Réglages).'
+            }
+            action={
+              status || q ? undefined : (
+                <Button icon={UserPlus} onClick={() => setAdding(true)}>
+                  Ajouter un affilié
+                </Button>
+              )
+            }
           />
         ) : (
           <div className="overflow-x-auto">

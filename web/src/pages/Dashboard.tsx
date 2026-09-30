@@ -1,14 +1,17 @@
-import { useState } from 'react';
-import { Link } from 'react-router';
+import { useEffect, useState } from 'react';
+import { Link, Navigate, useSearchParams } from 'react-router';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { ArrowUpRight, Eye, Funnel, Mail, MailOpen, Megaphone, MousePointerClick, UserPlus, Users } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useLoad } from '../lib/hooks';
+import { markOnboardingSettled, onboardingApi, onboardingSettled } from '../lib/onboarding-api';
 import { fmtNumber, fmtPercent, ratio } from '../lib/format';
-import { Card, CardHeader, cx, ErrorState, Skeleton, StatCard } from '../components/ui';
+import { useToast } from '../components/Toast';
+import { Card, CardHeader, cx, ErrorState, PageLoader, Skeleton, StatCard } from '../components/ui';
 import { RevenueCard } from './sales/SalesWidgets';
 import { AffiliationCard } from './affiliates/AffiliateMentionCard';
+import { StartChecklist } from './onboarding/StartChecklist';
 
 const SERIES = [
   { key: 'views', label: 'Vues', color: '#5b4bff' },
@@ -27,6 +30,34 @@ export function DashboardPage() {
   const hour = new Date().getHours();
   const hello = hour < 18 ? 'Bonjour' : 'Bonsoir';
   const firstName = user?.name?.split(' ')[0];
+
+  // Onboarding: a new account goes through the welcome flow once (until finished or skipped); afterwards the
+  // "Bien démarrer" checklist sits on top of the dashboard until it is complete or hidden (`?guide=1` reopens it).
+  const toast = useToast();
+  const [params, setParams] = useSearchParams();
+  const guide = params.get('guide') === '1';
+  const onboarding = useLoad(() => onboardingApi.get(), []);
+  const [hiding, setHiding] = useState(false);
+  const ob = onboarding.data;
+  useEffect(() => {
+    if (ob && !ob.required && user) markOnboardingSettled(user.id);
+  }, [ob, user]);
+  if (ob?.required) return <Navigate to="/welcome" replace />;
+  // first visit of this browser: wait for the answer rather than flashing the dashboard before the welcome flow
+  if (!ob && onboarding.loading && !(user && onboardingSettled(user.id))) return <PageLoader />;
+  const showChecklist = !!ob && (guide || (!ob.checklist.hidden && !ob.checklist.complete));
+  const hideChecklist = async () => {
+    setHiding(true);
+    try {
+      onboarding.setData(await onboardingApi.update({ checklist_hidden: true }));
+      if (guide) setParams({}, { replace: true });
+      toast.info('Liste masquée. Vous la retrouverez dans le menu de votre compte, « Bien démarrer ».');
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setHiding(false);
+    }
+  };
 
   return (
     <>
@@ -50,6 +81,8 @@ export function DashboardPage() {
           <JourneySteps data={data} />
         </div>
       </section>
+
+      {showChecklist && ob && <StartChecklist state={ob} onHide={hideChecklist} hiding={hiding} />}
 
       {error && !data ? (
         <ErrorState message={error} onRetry={reload} />

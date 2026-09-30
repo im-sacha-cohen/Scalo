@@ -911,6 +911,21 @@ export interface AffiliateCommissionsTable {
   updated_at: Timestamp;
 }
 
+// ---------- 0013 onboarding ----------
+
+/** Welcome flow of a new account (no row = never started). The checklist is computed, not stored. */
+export interface AccountOnboardingTable {
+  user_id: number;
+  goal: import('@scalo/shared').OnboardingGoal | null;
+  step: Default<import('@scalo/shared').OnboardingStep>;
+  funnel_id: number | null;
+  completed_at: NullableTimestamp;
+  skipped_at: NullableTimestamp;
+  checklist_hidden_at: NullableTimestamp;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
 export interface Database {
   payment_settings: PaymentSettingsTable;
   products: ProductsTable;
@@ -946,6 +961,8 @@ export interface Database {
   affiliate_referrals: AffiliateReferralsTable;
   affiliate_payouts: AffiliatePayoutsTable;
   affiliate_commissions: AffiliateCommissionsTable;
+  // 0013 tables
+  account_onboarding: AccountOnboardingTable;
   users: UsersTable;
   settings: SettingsTable;
   contacts: ContactsTable;
