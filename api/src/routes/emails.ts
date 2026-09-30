@@ -118,10 +118,11 @@ emailsRouter.get('/broadcasts', async (req, res) => {
 
 emailsRouter.post('/broadcasts', async (req, res) => {
   const userId = uid(req);
-  const { subject } = z.object({ subject: subjectSchema }).parse(req.body);
+  // `content`: email chosen in the template gallery (a kit's email…), otherwise the plain default
+  const { subject, content } = z.object({ subject: subjectSchema, content: pageContentSchema.optional() }).parse(req.body);
   const row = await db
     .insertInto('broadcasts')
-    .values({ user_id: userId, subject, content: JSON.stringify(emailTemplate()), status: 'draft', created_at: nowIso() })
+    .values({ user_id: userId, subject, content: JSON.stringify(content ?? emailTemplate()), status: 'draft', created_at: nowIso() })
     .returningAll()
     .executeTakeFirstOrThrow();
   res.status(201).json(await broadcastWithStats(row));

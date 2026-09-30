@@ -51,6 +51,8 @@ export interface Funnel {
   steps?: Step[];
   /** Pixels, cookie banner, legal pages footer (see growth.ts). */
   settings?: FunnelSettings;
+  /** Kit of the funnel (list endpoint; the detail has it in `settings.kit`). */
+  kit?: string | null;
 }
 
 export interface Step {

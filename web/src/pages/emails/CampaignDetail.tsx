@@ -39,6 +39,7 @@ import { useConfirm } from '../../components/ConfirmDialog';
 import { useUnsavedGuard } from '../../components/useUnsavedGuard';
 import { EmailPreview } from './EmailPreview';
 import { ConditionModal, conditionLabel, SubscribersCard } from './CampaignExtras';
+import { EmailTemplatePicker, emailChoiceContent, usePreferredKit, type EmailChoice } from '../../builder/kits';
 
 export function CampaignDetailPage() {
   const { id } = useParams();
@@ -404,11 +405,20 @@ function AddEmailModal({
   const [delay, setDelay] = useState(0);
   const [applyExisting, setApplyExisting] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [choice, setChoice] = useState<EmailChoice>(null);
+  const preferredKit = usePreferredKit();
+  const pickTemplate = (c: EmailChoice) => {
+    const previous = emailChoiceContent(choice)?.subject;
+    setChoice(c);
+    const next = emailChoiceContent(c)?.subject;
+    if (next && (!subject.trim() || subject === previous)) setSubject(next);
+  };
   useEffect(() => {
     if (open) {
       setSubject('');
       setDelay(isFirst ? 0 : 2);
       setApplyExisting(true);
+      setChoice(null);
     }
   }, [open, isFirst]);
 
@@ -416,7 +426,7 @@ function AddEmailModal({
     e.preventDefault();
     setSaving(true);
     try {
-      const created = await api.createCampaignEmail(campaignId, { subject: subject.trim(), delay_days: delay, apply_to_existing: applyExisting });
+      const created = await api.createCampaignEmail(campaignId, { subject: subject.trim(), delay_days: delay, apply_to_existing: applyExisting, content: emailChoiceContent(choice)?.content });
       toast.success(
         created.backfilled
           ? `Email ajouté : programmé pour ${created.backfilled} inscrit${created.backfilled > 1 ? 's' : ''} existant${created.backfilled > 1 ? 's' : ''}`
@@ -435,6 +445,7 @@ function AddEmailModal({
       open={open}
       onClose={onClose}
       title="Ajouter un email"
+      size="lg"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
@@ -456,6 +467,7 @@ function AddEmailModal({
             <span className="text-sm text-slate-500">jour{delay > 1 ? 's' : ''}</span>
           </div>
         </Field>
+        {open && <EmailTemplatePicker value={choice} onChange={pickTemplate} preferred={preferredKit} />}
         {subscribers > 0 ? (
           <div className="rounded-lg border border-slate-200 p-3">
             <label className="flex items-start gap-2.5 text-sm text-slate-700">

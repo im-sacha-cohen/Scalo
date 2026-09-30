@@ -12,6 +12,7 @@ import { useConfirm } from '../../components/ConfirmDialog';
 import { TrackingTab } from './TrackingTab';
 import { AiGenerateButton } from '../ai/AiGenerate';
 import { countsOf, inProgress, LiveDot, StackedProgress, totalOf } from './queue';
+import { EmailTemplatePicker, emailChoiceContent, usePreferredKit, type EmailChoice } from '../../builder/kits';
 
 type TabId = 'broadcasts' | 'campaigns' | 'outbox';
 
@@ -52,6 +53,16 @@ function BroadcastsTab() {
   const [open, setOpen] = useState(params.get('new') === '1');
   const [subject, setSubject] = useState('');
   const [saving, setSaving] = useState(false);
+  // email template: a kit's email (the kit of the account's funnels first) or the plain default
+  const [choice, setChoice] = useState<EmailChoice>(null);
+  const preferredKit = usePreferredKit();
+  const pickTemplate = (c: EmailChoice) => {
+    const previous = emailChoiceContent(choice)?.subject;
+    setChoice(c);
+    // propose the template's subject while the field is empty or still holds the previous proposal
+    const next = emailChoiceContent(c)?.subject;
+    if (next && (!subject.trim() || subject === previous)) setSubject(next);
+  };
 
   const close = () => {
     setOpen(false);
@@ -65,7 +76,7 @@ function BroadcastsTab() {
     e.preventDefault();
     setSaving(true);
     try {
-      const b = await api.createBroadcast(subject.trim());
+      const b = await api.createBroadcast(subject.trim(), emailChoiceContent(choice)?.content);
       navigate(`/emails/broadcasts/${b.id}`);
     } catch (err) {
       toast.error(err);
@@ -231,6 +242,8 @@ function BroadcastsTab() {
         open={open}
         onClose={close}
         title="Nouvelle newsletter"
+        description="Choisissez un modèle : ceux d’un kit reprennent l’identité visuelle de vos pages."
+        size="lg"
         footer={
           <>
             <Button variant="secondary" onClick={close}>
@@ -242,10 +255,11 @@ function BroadcastsTab() {
           </>
         }
       >
-        <form id="new-broadcast" onSubmit={create}>
+        <form id="new-broadcast" onSubmit={create} className="space-y-5">
           <Field label="Objet de l’email" hint="Vous pourrez le modifier ensuite.">
             <Input required value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="ex. Notre nouveauté du mois 🎉" />
           </Field>
+          {open && <EmailTemplatePicker value={choice} onChange={pickTemplate} preferred={preferredKit} />}
         </form>
       </Modal>
     </>

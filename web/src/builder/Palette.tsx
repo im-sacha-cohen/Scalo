@@ -13,6 +13,12 @@ import {
   renderEmailDocument,
   DEFAULT_SETTINGS,
   DEFAULT_EMAIL_SETTINGS,
+  KIT_SECTIONS,
+  getKit,
+  kitSection,
+  kitSectionList,
+  kitSettings,
+  type KitSectionKind,
   type Block,
   type BlockType,
   type SectionTemplate,
@@ -156,11 +162,12 @@ function useSavedSections(mode: BuilderMode) {
   return list.filter((s) => s.mode === mode);
 }
 
-export function SectionsPanel({ mode, accent }: { mode: BuilderMode; accent: string }) {
+export function SectionsPanel({ mode, accent, kitId }: { mode: BuilderMode; accent: string; kitId?: string | null }) {
   const { ops, getContent, ui } = useBuilder();
   const saved = useSavedSections(mode);
   const templates = SECTION_TEMPLATES.filter((s) => s.modes.includes(mode));
   const cats = [...new Set(templates.map((t) => t.category))];
+  const kit = getKit(kitId);
 
   /** Sections are inserted at the top level: after the selected top-level block, else at the end. */
   const rootTarget = (): InsertTarget => {
@@ -180,6 +187,16 @@ export function SectionsPanel({ mode, accent }: { mode: BuilderMode; accent: str
           <div className="space-y-1.5">
             {saved.map((s) => (
               <SavedItem key={s.id} item={s} onAdd={() => ops.insertBlocks([cloneBlock(s.block)], rootTarget())} />
+            ))}
+          </div>
+        </div>
+      )}
+      {kit && (
+        <div className="mb-4" data-kit-sections={kit.id}>
+          <p className="px-1 pt-1 pb-1.5 text-xs font-medium text-slate-400">Sections du kit {kit.name}</p>
+          <div className="space-y-2">
+            {kitSectionList(kit.id).map((s) => (
+              <KitSectionItem key={s.id} id={s.id} kitId={kit.id} kind={s.kind} mode={mode} onAdd={() => ops.insertBlocks(kitSection(kit.id, s.kind, mode), rootTarget())} />
             ))}
           </div>
         </div>
@@ -224,6 +241,35 @@ const SectionItem = memo(function SectionItem({ t, mode, accent, onAdd }: { t: S
         <DocThumb html={html} width={254} docWidth={mode === 'email' ? 640 : 1280} ratio={0.42} />
       </div>
       <div className="px-2.5 py-1.5 text-xs font-medium text-slate-700 group-hover:text-slate-900">{t.name}</div>
+    </button>
+  );
+});
+
+/** A section of the page's kit (header, hero, testimonials…): same look as the rest of the page. */
+const KitSectionItem = memo(function KitSectionItem({ id, kitId, kind, mode, onAdd }: { id: string; kitId: string; kind: KitSectionKind; mode: BuilderMode; onAdd: () => void }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `section:${id}`, data: { from: 'palette', item: { kind: 'section', id } } });
+  const html = useMemo(() => {
+    const kit = getKit(kitId)!;
+    const content = { settings: kitSettings(kit, mode), blocks: kitSection(kitId, kind, mode) };
+    return mode === 'email' ? renderEmailDocument(content, { subject: KIT_SECTIONS[kind].name }) : renderPageDocument(content, { title: KIT_SECTIONS[kind].name });
+  }, [kitId, kind, mode]);
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      {...attributes}
+      {...listeners}
+      onClick={onAdd}
+      data-kit-section={kind}
+      className={cx(
+        'group block w-full cursor-grab overflow-hidden rounded-lg border bg-white text-left transition-all active:cursor-grabbing',
+        isDragging ? 'border-brand-300 opacity-40' : 'border-slate-200 hover:border-slate-300 hover:shadow-card',
+      )}
+    >
+      <div className="pointer-events-none border-b border-slate-100">
+        <DocThumb html={html} width={254} docWidth={mode === 'email' ? 640 : 1280} ratio={0.42} />
+      </div>
+      <div className="px-2.5 py-1.5 text-xs font-medium text-slate-700 group-hover:text-slate-900">{KIT_SECTIONS[kind].name}</div>
     </button>
   );
 });

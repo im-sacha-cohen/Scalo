@@ -10,6 +10,8 @@ import { z } from 'zod';
 import {
   DEFAULT_EMAIL_SETTINGS,
   DEFAULT_SETTINGS,
+  getKit,
+  kitSettings,
   uid,
   type Block,
   type PageContent,
@@ -32,6 +34,13 @@ const briefBase = {
   audience: z.string().trim().max(1000).default(''),
   tone: toneSchema,
   language: languageSchema,
+  /** Optional kit (shared/kits): the generated pages / emails take its fonts, colors and tokens. */
+  kit: z
+    .string()
+    .trim()
+    .max(40)
+    .refine((id) => !!getKit(id), 'Kit inconnu')
+    .optional(),
 };
 
 export const funnelBriefSchema = z.strictObject({ ...briefBase, goal: z.enum(AI_GOALS).default('capture') });
@@ -250,7 +259,7 @@ const section = (children: Block[], extra: Partial<SectionBlock> = {}): SectionB
 });
 
 /** One outline section → one `section` block, or null when it is empty / not allowed on this page type. */
-function toSection(sec: Section, page: StepType, ctx: { accent: string; tag: string }): SectionBlock | null {
+function toSection(sec: Section, page: StepType, ctx: { accent: string; ink: string; tag: string }): SectionBlock | null {
   const title = 'title' in sec ? cleanText(sec.title, 160) : '';
   const head = title ? [heading(title, 2)] : [];
   switch (sec.kind) {
@@ -261,7 +270,7 @@ function toSection(sec: Section, page: StepType, ctx: { accent: string; tag: str
       const sub = cleanText(sec.subtitle, 400);
       return section(
         [
-          ...(eyebrow ? [{ id: id(), type: 'text', text: eyebrow.toUpperCase(), style: { align: 'center', color: ctx.accent, fontSize: 13, fontWeight: 700, letterSpacing: 1 } } as Block] : []),
+          ...(eyebrow ? [{ id: id(), type: 'text', text: eyebrow.toUpperCase(), style: { align: 'center', color: ctx.ink, fontSize: 13, fontWeight: 700, letterSpacing: 1 } } as Block] : []),
           heading(t, 1),
           ...(sub ? [{ id: id(), type: 'text', text: sub, style: { align: 'center', fontSize: 19 } } as Block] : []),
         ],
@@ -357,15 +366,20 @@ export interface GeneratedFunnel {
 
 const STEP_NAMES: Record<StepType, string> = { optin: 'Inscription', sales: 'Offre', thankyou: 'Merci', custom: 'Page' };
 
-/** Validated outline → funnel steps. Returns null when a required page is missing or empty. */
-export function buildFunnel(out: FunnelOutput, goal: AiGoal): GeneratedFunnel | null {
-  const accent = PALETTES[out.palette];
+/**
+ * Validated outline → funnel steps. Returns null when a required page is missing or empty.
+ * `kitId`: the pages take the kit's settings (fonts, colors, tokens) and its accent instead of the model's palette —
+ * the blocks stay the same server-built ones, the renderer styles them from the tokens.
+ */
+export function buildFunnel(out: FunnelOutput, goal: AiGoal, kitId?: string): GeneratedFunnel | null {
+  const kit = getKit(kitId);
+  const accent = kit ? kit.tokens.accent : PALETTES[out.palette];
   const tag = cleanText(out.tag, 60);
   const steps: GeneratedFunnel['steps'] = [];
   for (const type of GOAL_STEPS[goal]) {
     const page = out.pages.find((p) => p.type === type);
     if (!page) return null;
-    const ctx = { accent, tag };
+    const ctx = { accent, ink: kit ? kit.tokens.accentInk : accent, tag };
     let blocks = page.sections.slice(0, 12).map((sec) => toSection(sec, type, ctx)).filter((b): b is SectionBlock => !!b);
     if (type === 'optin') {
       // exactly one form on a capture page
@@ -385,7 +399,11 @@ export function buildFunnel(out: FunnelOutput, goal: AiGoal): GeneratedFunnel | 
       name: cleanText(page.name, 60) || STEP_NAMES[type],
       type,
       content: {
-        settings: { ...DEFAULT_SETTINGS, accent, contentBackground: '#ffffff', ...(seoTitle ? { seoTitle } : {}), ...(seoDescription ? { seoDescription } : {}) },
+        settings: {
+          ...(kit ? kitSettings(kit, 'page', { maxWidth: 880, contentPadding: 24 }) : { ...DEFAULT_SETTINGS, accent, contentBackground: '#ffffff' }),
+          ...(seoTitle ? { seoTitle } : {}),
+          ...(seoDescription ? { seoDescription } : {}),
+        },
         blocks,
       },
     });
@@ -399,7 +417,8 @@ export interface GeneratedEmail {
 }
 
 /** One generated email → subject + email content (text blocks, optional button to the user's own link). */
-export function buildEmail(e: NewsletterOutput, linkUrl: string | undefined): GeneratedEmail | null {
+export function buildEmail(e: NewsletterOutput, linkUrl: string | undefined, kitId?: string): GeneratedEmail | null {
+  const kit = getKit(kitId);
   const subject = cleanText(e.subject, 250).replace(/\s*\n\s*/g, ' ');
   const paragraphs = cleanList(e.paragraphs, 12, 1500);
   if (!subject || !paragraphs.length) return null;
@@ -407,7 +426,8 @@ export function buildEmail(e: NewsletterOutput, linkUrl: string | undefined): Ge
   const preheader = cleanText(e.preheader, 150);
   const blocks: Block[] = paragraphs.map((p) => text(p));
   if (linkUrl && label) blocks.push({ id: id(), type: 'button', label, action: 'url', url: linkUrl, style: { align: 'center' } });
-  return { subject, content: { settings: { ...DEFAULT_EMAIL_SETTINGS, ...(preheader ? { preheader } : {}) }, blocks } };
+  const settings = kit ? kitSettings(kit, 'email', { contentPadding: 16 }) : { ...DEFAULT_EMAIL_SETTINGS };
+  return { subject, content: { settings: { ...settings, ...(preheader ? { preheader } : {}) }, blocks } };
 }
 
 export const clampDelay = (d: number, first: boolean) => (first ? 0 : Math.min(60, Math.max(0, Math.trunc(d))));

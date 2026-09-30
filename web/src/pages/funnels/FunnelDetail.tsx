@@ -26,8 +26,9 @@ import {
   Lock,
   type LucideIcon,
 } from 'lucide-react';
-import { DEFAULT_SETTINGS, renderPageDocument, type Funnel, type PageContent, type Step, type StepType } from '@scalo/shared';
-import { DocThumb, usePageTemplatePreviews } from '../../builder/TemplateGallery';
+import { DEFAULT_SETTINGS, KITS, KIT_PAGES, KIT_PAGE_KINDS, getKit, isKitPageKind, kitPage, kitPageForStep, renderPageDocument, type Funnel, type PageContent, type Step, type StepType } from '@scalo/shared';
+import { DocThumb, stripScripts, usePageTemplatePreviews } from '../../builder/TemplateGallery';
+import { kitPagePreview } from '../../builder/kits';
 import { api } from '../../lib/api';
 import { copyText, useLoad } from '../../lib/hooks';
 import { fmtNumber, fmtPercent, ratio, slugify, STEP_TYPE_LABELS } from '../../lib/format';
@@ -253,6 +254,7 @@ export function FunnelDetailPage() {
       <AddStepModal
         open={addOpen}
         funnelId={funnel.id}
+        funnelKit={funnel.settings?.kit ?? null}
         onClose={() => setAddOpen(false)}
         onCreated={(s) => {
           setSteps([...steps, { views: 0, optins: 0, ...s }]);
@@ -351,7 +353,7 @@ function UrlChip({ url, className }: { url: string; className?: string }) {
 function PagePreview({ step }: { step: Step }) {
   const box = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.4);
-  const html = useMemo(() => renderPageDocument(step.content, { title: step.name, nextUrl: '#', formAction: '#', baseUrl: window.location.origin }), [step.content, step.name]);
+  const html = useMemo(() => stripScripts(renderPageDocument(step.content, { title: step.name, nextUrl: '#', formAction: '#', baseUrl: window.location.origin })), [step.content, step.name]);
   useEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -535,7 +537,7 @@ function TypePicker({ value, onChange }: { value: StepType; onChange: (t: StepTy
   );
 }
 
-function AddStepModal({ open, funnelId, onClose, onCreated }: { open: boolean; funnelId: number; onClose: () => void; onCreated: (s: Step) => void }) {
+function AddStepModal({ open, funnelId, funnelKit, onClose, onCreated }: { open: boolean; funnelId: number; funnelKit: string | null; onClose: () => void; onCreated: (s: Step) => void }) {
   const toast = useToast();
   const [name, setName] = useState('');
   const [type, setType] = useState<StepType>('optin');
@@ -553,7 +555,14 @@ function AddStepModal({ open, funnelId, onClose, onCreated }: { open: boolean; f
     e.preventDefault();
     setSaving(true);
     try {
-      const chosen = tpl === 'blank' ? ({ settings: { ...DEFAULT_SETTINGS }, blocks: [] } as PageContent) : TEMPLATE_BUILDERS[tpl]?.();
+      // 'default' sends no content: the server uses the funnel's kit page for the type (or the classic template)
+      const kitChoice = /^kit:([a-z0-9-]+):(\w+)$/.exec(tpl);
+      const chosen =
+        tpl === 'blank'
+          ? (funnelKit && kitPageForStep(funnelKit, 'custom')) || ({ settings: { ...DEFAULT_SETTINGS }, blocks: [] } as PageContent)
+          : kitChoice && isKitPageKind(kitChoice[2])
+            ? (kitPage(kitChoice[1]!, kitChoice[2]) ?? undefined)
+            : TEMPLATE_BUILDERS[tpl]?.();
       const s = await api.createStep(funnelId, { name: name.trim(), type, content: chosen });
       toast.success('Étape ajoutée');
       onCreated(s);
@@ -590,7 +599,7 @@ function AddStepModal({ open, funnelId, onClose, onCreated }: { open: boolean; f
           <p className="mb-2 text-sm font-medium text-slate-700">Type de page</p>
           <TypePicker value={type} onChange={setType} />
         </div>
-        {open && <StepTemplatePicker value={tpl} onChange={(id, stepType) => { setTpl(id); if (stepType) setType(stepType); }} />}
+        {open && <StepTemplatePicker value={tpl} funnelKit={funnelKit} onChange={(id, stepType) => { setTpl(id); if (stepType) setType(stepType); }} />}
       </form>
     </Modal>
   );
@@ -598,8 +607,11 @@ function AddStepModal({ open, funnelId, onClose, onCreated }: { open: boolean; f
 
 const TEMPLATE_BUILDERS: Record<string, () => PageContent> = {};
 
-function StepTemplatePicker({ value, onChange }: { value: string; onChange: (id: string, type?: StepType) => void }) {
+function StepTemplatePicker({ value, funnelKit, onChange }: { value: string; funnelKit: string | null; onChange: (id: string, type?: StepType) => void }) {
   const previews = usePageTemplatePreviews();
+  // the kit of the funnel comes first; another kit can be picked, the classic templates stay available below
+  const [kitId, setKitId] = useState<string>(funnelKit && getKit(funnelKit) ? funnelKit : KITS[0]!.id);
+  const kit = getKit(kitId) ?? KITS[0]!;
   for (const p of previews) TEMPLATE_BUILDERS[p.t.id] = () => p.t.build();
   const Opt = ({ id, label, children, type }: { id: string; label: string; children: React.ReactNode; type?: StepType }) => (
     <button
@@ -613,9 +625,33 @@ function StepTemplatePicker({ value, onChange }: { value: string; onChange: (id:
   );
   return (
     <div>
-      <p className="mb-2 text-sm font-medium text-slate-700">Modèle de page</p>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium text-slate-700">
+          Pages du kit {kit.name}
+          {funnelKit === kit.id && <span className="ml-2 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">kit de ce tunnel</span>}
+        </p>
+        <label className="flex items-center gap-2 text-xs text-slate-500">
+          Kit
+          <select aria-label="Kit" value={kit.id} onChange={(e) => setKitId(e.target.value)} className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-700">
+            {KITS.map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.name}
+                {k.id === funnelKit ? ' (ce tunnel)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="mb-4 grid grid-cols-3 gap-3 sm:grid-cols-4">
+        {KIT_PAGE_KINDS.map((kind) => (
+          <Opt key={kind} id={`kit:${kit.id}:${kind}`} label={KIT_PAGES[kind].name} type={KIT_PAGES[kind].stepType}>
+            <DocThumb html={kitPagePreview(kit.id, kind)} width={190} ratio={0.6} />
+          </Opt>
+        ))}
+      </div>
+      <p className="mb-2 text-sm font-medium text-slate-700">Modèles classiques</p>
       <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
-        <Opt id="default" label="Modèle du type (par défaut)">
+        <Opt id="default" label={funnelKit ? 'Selon le type, dans le kit' : 'Modèle du type (par défaut)'}>
           <div className="flex h-[114px] items-center justify-center bg-brand-50 text-xs font-medium text-brand-700">Selon le type</div>
         </Opt>
         {previews.map((p) => (

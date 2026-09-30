@@ -50,6 +50,8 @@ export interface AiBrief {
   audience?: string;
   tone?: AiTone;
   language?: AiLanguage;
+  /** Kit (visual identity) applied to the generated pages / emails. */
+  kit?: string;
 }
 
 type Started = { id: number; status: 'running' };

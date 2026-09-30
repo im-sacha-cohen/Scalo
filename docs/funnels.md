@@ -1,8 +1,46 @@
 [← Retour au README](../README.md)
 
-# Tunnels : domaines personnalisés, tests A/B, statistiques, pixels, RGPD, partage
+# Tunnels : kits, domaines personnalisés, tests A/B, statistiques, pixels, RGPD, partage
 
 Tout se règle dans la fiche d’un tunnel (`/funnels/:id`), onglets **Étapes**, **Statistiques**, **Domaines**, **Suivi et RGPD**, **Partage**. Contrat d’API détaillé : [SPEC.md](../SPEC.md#croissance-des-tunnels-domaines-ab-statistiques-pixels-rgpd-partage).
+
+## Kits : des pages et des emails qui vont ensemble
+
+Un **kit** est une identité visuelle (palette, polices, rayons, style des boutons, densité, illustrations) partagée par un jeu complet de pages — capture, vente longue, bon de commande, offre en un clic, remerciement, inscription webinaire, bientôt disponible — et d’emails (bienvenue, newsletter, annonce, relance, confirmation webinaire).
+
+| Kit | Pour qui | Parti pris |
+|---|---|---|
+| Cabinet | Coach, consultant | Sobre : papier ivoire, titres en serif, filets fins, un seul vert profond |
+| Studio | Créateur de formation | Énergique : contours noirs épais, ombres décalées, vermillon sur jaune |
+| Orbite | SaaS, produit numérique | Net : blancs froids, bleu électrique, cartes douces, maquette d’interface |
+| Revue | Auteur, newsletter, média | Éditorial : grand serif à italiques, sections numérotées, angles droits |
+| Douceur | Bien-être, soin, yoga | Doux : papier rosé, encre prune, serif délié, boutons pilule |
+| Nocturne | Haut de gamme, cercle privé | Sombre : noir profond, or brossé, cadres fins, capitales espacées |
+| Marché | Artisan, commerce local | Chaleureux : kraft, terre cuite, olive, serif généreux |
+| Scène | Événement, webinaire | Affiche : indigo nuit, magenta, jaune projecteur, capitales condensées |
+
+Où on les choisit :
+
+- **Nouveau tunnel** : un kit, puis un type de tunnel (capture, vente, webinaire, lancement). Toutes les étapes sont créées dans le kit ; les modèles classiques restent disponibles dans l’onglet voisin.
+- **Le tunnel retient son kit** : « Ajouter une étape » propose d’abord ses pages, et les pages légales ajoutées depuis « Suivi et RGPD » en reprennent les polices et les couleurs. L’export / import et la duplication le conservent.
+- **Éditeur** : la galerie de modèles est rangée par kit (recherche, filtre par type de page). « Appliquer ce kit à cette page » change les réglages (polices, couleurs, style des cartes et des boutons) sans toucher aux blocs — pratique sur une page vide ou pour changer de kit. Le panneau **Sections** propose les sections du kit de la page (en-tête, héros, bénéfices, programme, témoignages, offre, FAQ, appel à l’action, pied de page).
+- **Emails** : voir [Emails](emails.md#modèles-par-kit).
+- **Parcours de bienvenue** et **génération par l’IA** : un choix de style parmi quelques kits.
+
+Les textes sont des exemples. Ce qui doit être remplacé est entre crochets : témoignages (`[Témoignage à remplacer]`), prix (`000 €`), dates, liens. Le bloc Paiement des pages « Bon de commande » et « Offre en un clic » doit être relié à une de vos offres.
+
+### Ajouter un kit (contributeurs)
+
+Un kit est **un fichier** de `shared/src/kits/` : des jetons, une recette de mise en page et des textes. Il ne construit aucun bloc lui-même : les pages, les emails et les sections sont composés par `compose.ts` et `pages.ts` à partir de ces trois objets.
+
+1. Copiez un kit proche, par exemple `shared/src/kits/cabinet.ts`, vers `shared/src/kits/monkit.ts` et changez `id` (minuscules, unique), `name`, `pitch`, `universe`, `goals`.
+2. **`tokens`** : la palette (couleurs hexadécimales à 6 chiffres), les polices — `fontHeading` et `fontBody` commencent par une police de `GOOGLE_FONTS` (`shared/src/render.ts`) et se terminent par des replis sûrs en email (`Georgia, serif` ou `Arial, sans-serif`) —, les rayons, `shadow` (`none`, `soft`, `hard`), la graisse et la casse des titres, l’échelle (`h1`, `h2`, `lead`), la densité (`space`) et la largeur (`width`). Chaque couple texte / fond doit atteindre un contraste de 4,5 : `text`, `muted` et `accentInk` sur `bg`, `alt` et `surface` ; `accentText` sur `accent` ; `inverseText`, `inverseMuted` et `inverseAccent` sur `inverse`.
+3. **`layout`** : choisissez une composition par rôle (`hero`, `benefits`, `proof`, `offer`, `cta`, `header`, `footer`, `eyebrow`, `art`…). La combinaison doit être différente de celle des kits existants : un kit n’est pas une variation de couleur.
+4. **`copy`** : des textes en français propres à l’univers du kit. Pas de chiffres ni de témoignages inventés : laissez des emplacements entre crochets.
+5. Enregistrez le kit dans `KITS` (`shared/src/kits/index.ts`). C’est tout : il apparaît dans la création de tunnel, les galeries, les emails et l’API.
+6. Lancez `npm test` : `api/test/kits.test.ts` vérifie les pages et emails requis, la validité du contenu, l’unicité des ids, l’absence de bloc `html`, de script et d’URL externe, le contraste des jetons et le rendu. Regardez aussi le résultat à 1440 px et 390 px (pages), 640 px et 390 px (emails).
+
+Besoin d’une composition qui n’existe pas ? Ajoutez une variante dans `compose.ts` (par exemple un nouveau `hero`) plutôt que des blocs dans le fichier du kit, et une nouvelle illustration dans `art.ts` (SVG en ligne, uniquement avec les couleurs des jetons — aucune image externe). Les jetons atteignent le renderer par `settings.theme` (`PageTheme`) : ce sont des valeurs par défaut, un contenu sans thème se rend exactement comme avant.
 
 ## Domaines personnalisés
 

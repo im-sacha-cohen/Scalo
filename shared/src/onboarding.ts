@@ -16,6 +16,17 @@ export const ONBOARDING_TEMPLATE: Record<OnboardingGoal, 'optin' | 'sales'> = {
   migrate: 'optin',
 };
 
+/**
+ * Kits (shared/kits) proposed at the « Votre premier tunnel » step for a goal: a short visual choice, not a catalog.
+ * The first one is preselected.
+ */
+export const ONBOARDING_KITS: Record<OnboardingGoal, string[]> = {
+  leads: ['cabinet', 'douceur', 'revue', 'marche'],
+  sell: ['orbit', 'studio', 'nocturne', 'marche'],
+  course: ['studio', 'cabinet', 'douceur', 'scene'],
+  migrate: ['cabinet', 'orbit', 'studio', 'douceur'],
+};
+
 export type OnboardingItemId =
   | 'sender'
   | 'funnel'

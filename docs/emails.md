@@ -1,6 +1,13 @@
 [← Retour au README](../README.md)
 
-# Emails : programmation, double opt-in, campagnes, délivrabilité
+# Emails : modèles par kit, programmation, double opt-in, campagnes, délivrabilité
+
+## Modèles par kit
+- À la création d’une newsletter (**Nouvelle newsletter**) ou d’un email de campagne (**Ajouter un email**), choisissez un **kit** puis l’un de ses cinq emails : bienvenue, newsletter éditoriale, annonce / promotion, relance, confirmation d’inscription à un webinaire — ou « Email simple » (texte seul, comme avant). L’objet proposé par le modèle remplit le champ tant qu’il est vide.
+- Si le compte a un tunnel créé depuis un kit, **ce kit est proposé en premier** (« votre kit ») : les emails reprennent la palette, les boutons et le ton des pages.
+- Dans l’éditeur d’email, la galerie **Modèles** est rangée par kit et le panneau **Sections** propose les sections du kit de l’email.
+- Les emails des kits respectent les contraintes de l’email : mise en page en tables, largeur 600 px, boutons « bulletproof », aucune image, et des polices de repli (Georgia, Arial) puisque les clients de messagerie ne chargent pas les polices web. Les liens des boutons sont à renseigner (`#` par défaut).
+- Ajouter un kit : voir [Tunnels → Ajouter un kit](funnels.md#ajouter-un-kit-contributeurs).
 
 ## Newsletters programmées
 - Éditeur de newsletter → **Programmer** (date + heure dans le fuseau du navigateur, affiché) ou **Envoyer maintenant**. Bandeau « Programmée pour … » avec compte à rebours, **Modifier la date**, **Annuler la programmation** (redevient brouillon).

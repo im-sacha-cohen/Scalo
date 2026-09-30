@@ -3,6 +3,8 @@ import { DEFAULT_EMAIL_SETTINGS, DEFAULT_SETTINGS } from './render';
 import type { LegalPageKind } from './growth';
 // library.ts only uses helpers from this module inside functions, so the import cycle is safe.
 import { pageTemplateForStep } from './library';
+// same for the kits (they use `uid` from this module inside functions only)
+import { getKit, kitSettings } from './kits';
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -188,7 +190,9 @@ export interface LegalVars {
  * Ready-made French legal page, pre-filled from the account settings. Everything the settings cannot provide is left
  * as a visible `[À compléter …]` marker. A starting point, not legal advice.
  */
-export function legalPageTemplate(kind: LegalPageKind, v: LegalVars = {}): PageContent {
+export function legalPageTemplate(kind: LegalPageKind, v: LegalVars = {}, kitId?: string | null): PageContent {
+  // `kitId`: kit of the funnel — the legal page takes its fonts, colors and tokens (same text, same structure)
+  const kit = getKit(kitId);
   const todo = (what: string) => `[À compléter : ${what}]`;
   const company = v.company?.trim() || todo('raison sociale ou nom de l’éditeur');
   const address = v.address?.trim().replace(/\s*\n\s*/g, ', ') || todo('adresse du siège');
@@ -260,6 +264,7 @@ export function legalPageTemplate(kind: LegalPageKind, v: LegalVars = {}): PageC
       p(`Service client : ${email}`),
     );
   }
+  if (kit) return { settings: kitSettings(kit, 'page', { maxWidth: 760, contentPadding: 40 }), blocks };
   return { settings: { ...DEFAULT_SETTINGS, maxWidth: 760 }, blocks };
 }
 

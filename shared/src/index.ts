@@ -12,3 +12,4 @@ export * from './courses';
 export * from './imports';
 export * from './affiliates';
 export * from './onboarding';
+export * from './kits';

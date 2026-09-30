@@ -19,6 +19,10 @@ import {
 } from 'lucide-react';
 import {
   FUNNEL_TEMPLATES,
+  ONBOARDING_KITS,
+  getKit,
+  kitPageForStep,
+  type KitDefinition,
   ONBOARDING_TEMPLATE,
   renderPageDocument,
   stepTemplate,
@@ -266,7 +270,11 @@ export function FunnelStep({
   const navigate = useNavigate();
   const tplKey = ONBOARDING_TEMPLATE[goal];
   const tpl = FUNNEL_TEMPLATES[tplKey]!;
-  const previews = useMemo(() => tpl.steps.map((s) => ({ ...s, html: render(stepTemplate(s.type), s.name) })), [tpl]);
+  // one visual choice: 3–4 kits suited to the goal; every page of the funnel is created in the chosen kit
+  const kits = useMemo(() => ONBOARDING_KITS[goal].map((id) => getKit(id)).filter((k): k is KitDefinition => !!k), [goal]);
+  const [kitId, setKitId] = useState<string | null>(kits[0]?.id ?? null);
+  const kit = kits.find((k) => k.id === kitId) ?? null;
+  const previews = useMemo(() => tpl.steps.map((s) => ({ ...s, html: render((kit && kitPageForStep(kit.id, s.type)) || stepTemplate(s.type), s.name) })), [tpl, kit]);
   const [shown, setShown] = useState(0);
   const [mode, setMode] = useState<'template' | 'ai'>('template');
   const [offer, setOffer] = useState('');
@@ -289,7 +297,7 @@ export function FunnelStep({
     setBusy('template');
     setError(null);
     try {
-      const f = await api.createFunnel({ name: funnelName, template: tplKey });
+      const f = await api.createFunnel({ name: funnelName, template: tplKey, ...(kit ? { kit: kit.id } : {}) });
       await onCreated(f.id, notice);
     } catch (e) {
       setError((e as Error).message);
@@ -303,7 +311,7 @@ export function FunnelStep({
     setBusy('ai');
     setError(null);
     try {
-      const { id } = await aiApi.generateFunnel({ offer: offer.trim(), goal: tplKey === 'sales' ? 'vente' : 'capture' });
+      const { id } = await aiApi.generateFunnel({ offer: offer.trim(), goal: tplKey === 'sales' ? 'vente' : 'capture', ...(kit ? { kit: kit.id } : {}) });
       const g = await waitForGeneration(id, ctrl.signal);
       if (!g.result?.funnel_id) throw new Error('aucun tunnel n’a été créé');
       await onCreated(g.result.funnel_id);
@@ -405,6 +413,38 @@ export function FunnelStep({
               </div>
             )}
 
+            {kits.length > 1 && (
+              <div>
+                <p id="onb-kit-label" className="mb-2 text-sm font-medium text-slate-700">
+                  Choisissez un style
+                </p>
+                <div role="radiogroup" aria-labelledby="onb-kit-label" className="grid grid-cols-2 gap-2">
+                  {kits.map((k) => (
+                    <button
+                      key={k.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={kit?.id === k.id}
+                      data-onb-kit={k.id}
+                      onClick={() => setKitId(k.id)}
+                      className={cx(
+                        'rounded-xl border-2 px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-4 focus-visible:ring-brand-500/25',
+                        kit?.id === k.id ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:border-slate-300',
+                      )}
+                    >
+                      <span className="flex items-center gap-1" aria-hidden="true">
+                        {[k.tokens.bg, k.tokens.alt, k.tokens.text, k.tokens.accent, k.tokens.accent2].map((c, i) => (
+                          <span key={i} className="h-3.5 w-3.5 rounded-full ring-1 ring-slate-900/10" style={{ background: c }} />
+                        ))}
+                      </span>
+                      <span className="mt-1.5 block font-display text-[15px] font-bold text-ink">{k.name}</span>
+                      <span className="block text-xs text-slate-500">{k.universe}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {mode === 'ai' && aiReady ? (
               <Field label="Décrivez votre offre en une phrase" hint="L’IA écrit les titres, les textes et le formulaire à partir de cette phrase. 10 caractères au minimum.">
                 <Textarea
@@ -458,10 +498,10 @@ export function FunnelStep({
 
       <aside className="xl:pt-2">
         <BrowserFrame address={address}>
-          <PageThumb key={shown} html={previews[shown]!.html} className="onb-fade aspect-[16/11]" />
+          <PageThumb key={`${kit?.id}:${shown}`} html={previews[shown]!.html} className="onb-fade aspect-[16/11]" />
         </BrowserFrame>
         <p className="mt-3 text-center text-xs text-slate-500">
-          Aperçu réel du modèle — page « {previews[shown]!.name} » ({shown + 1} sur {previews.length})
+          Aperçu réel{kit ? ` du kit ${kit.name}` : ' du modèle'} — page « {previews[shown]!.name} » ({shown + 1} sur {previews.length})
         </p>
       </aside>
     </div>

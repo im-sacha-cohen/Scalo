@@ -123,6 +123,7 @@ export async function buildExport(funnelId: number, ex: Db = db): Promise<Funnel
       name: f.name,
       slug: f.slug,
       settings: {
+        ...(settings.kit ? { kit: settings.kit } : {}),
         ...(settings.tracking ? { tracking: settings.tracking } : {}),
         ...(settings.cookie_banner ? { cookie_banner: { ...banner, privacy_step: privacy_step_id ? (index.get(privacy_step_id) ?? null) : null } } : {}),
         ...(settings.legal ? { legal: { footer: settings.legal.footer, steps: settings.legal.step_ids.map((id) => index.get(id)).filter((i): i is number => i !== undefined) } } : {}),
@@ -174,6 +175,7 @@ export const funnelExportSchema = z
         slug: z.string().trim().max(80).optional(),
         settings: z
           .object({
+            kit: funnelSettingsInput.shape.kit,
             tracking: funnelSettingsInput.shape.tracking,
             cookie_banner: z
               .object({
@@ -249,6 +251,7 @@ export async function importFunnel(userId: number, raw: unknown, opts: { name?: 
     const st = data.funnel.settings ?? {};
     const settings = clean(
       funnelSettingsInput.parse({
+        ...(st.kit ? { kit: st.kit } : {}),
         ...(st.tracking ? { tracking: st.tracking } : {}),
         ...(st.cookie_banner
           ? {

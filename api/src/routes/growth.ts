@@ -123,7 +123,8 @@ export function createGrowthRouter(opts: { dns?: DnsResolver } = {}) {
     const { kind } = z.object({ kind: z.enum(['mentions', 'privacy', 'cgv']) }).parse(req.body);
     const s = await getSettingsRow(userId);
     const meta = LEGAL_PAGES[kind as LegalPageKind];
-    const content = legalPageTemplate(kind, { company: s.sender_name, address: s.company_address, email: s.sender_email, site: f.name });
+    // the legal page takes the kit of the funnel (fonts, colors), if it has one
+    const content = legalPageTemplate(kind, { company: s.sender_name, address: s.company_address, email: s.sender_email, site: f.name }, readFunnelSettings(f.settings).kit);
     const stepId = await db.transaction().execute(async (trx) => {
       const taken = new Set((await trx.selectFrom('steps').select('slug').where('funnel_id', '=', f.id).execute()).map((x) => x.slug));
       let slug = meta.slug;

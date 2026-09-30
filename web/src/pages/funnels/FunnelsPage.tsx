@@ -1,7 +1,8 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { Eye, Funnel as FunnelIcon, Layers, MousePointerClick, Plus, CircleCheck, FileText, Percent, Upload } from 'lucide-react';
-import { FUNNEL_TEMPLATES, type Funnel } from '@scalo/shared';
+import { FUNNEL_TEMPLATES, KITS, KIT_FLOWS, type Funnel, type KitGoal } from '@scalo/shared';
+import { Chips, KIT_GOAL_LABELS, KitCards, KitFlowStrip, KitSwatch, SearchBox, kitMatches } from '../../builder/kits';
 import { api } from '../../lib/api';
 import { useLoad } from '../../lib/hooks';
 import { fmtDate, fmtNumber, fmtPercent, ratio, STEP_TYPE_LABELS } from '../../lib/format';
@@ -137,21 +138,40 @@ function CreateFunnelModal({ open, onClose }: { open: boolean; onClose: () => vo
   const navigate = useNavigate();
   const toast = useToast();
   const [name, setName] = useState('');
+  // 'kits': a visual identity + a funnel type, every step in the same kit; 'classic': the historical templates
+  const [source, setSource] = useState<'kits' | 'classic'>('kits');
   const [template, setTemplate] = useState<string>('optin');
+  const [kitId, setKitId] = useState<string>(KITS[0]!.id);
+  const [flow, setFlow] = useState<KitGoal>('capture');
+  const [goal, setGoal] = useState<KitGoal | 'all'>('all');
+  const [query, setQuery] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
       setName('');
+      setSource('kits');
       setTemplate('optin');
+      setKitId(KITS[0]!.id);
+      setFlow('capture');
+      setGoal('all');
+      setQuery('');
     }
   }, [open]);
+
+  const kits = useMemo(() => KITS.filter((k) => (goal === 'all' || k.goals.includes(goal)) && kitMatches(k, query)), [goal, query]);
+  const kit = KITS.find((k) => k.id === kitId) ?? KITS[0]!;
+
+  const pickGoal = (g: KitGoal | 'all') => {
+    setGoal(g);
+    if (g !== 'all') setFlow(g);
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const f = await api.createFunnel({ name: name.trim(), template });
+      const f = await api.createFunnel(source === 'kits' ? { name: name.trim(), template: 'blank', kit: kit.id, flow } : { name: name.trim(), template });
       toast.success('Tunnel créé');
       onClose();
       navigate(`/funnels/${f.id}`);
@@ -166,9 +186,9 @@ function CreateFunnelModal({ open, onClose }: { open: boolean; onClose: () => vo
     <Modal
       open={open}
       onClose={onClose}
-      size="lg"
+      size="full"
       title="Nouveau tunnel"
-      description="Donnez-lui un nom et choisissez un modèle de départ."
+      description="Choisissez un kit : toutes les pages du tunnel partagent la même identité visuelle, et vos emails pourront la reprendre."
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
@@ -181,49 +201,117 @@ function CreateFunnelModal({ open, onClose }: { open: boolean; onClose: () => vo
       }
     >
       <form id="create-funnel" onSubmit={submit} className="space-y-5">
-        <Field label="Nom du tunnel">
-          <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="ex. Guide gratuit marketing" />
-        </Field>
-        <div>
-          <p className="mb-2 text-sm font-medium text-slate-700">Modèle</p>
-          <div className="grid gap-3 sm:grid-cols-3">
-            {Object.entries(FUNNEL_TEMPLATES).map(([key, t]) => {
-              const active = template === key;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setTemplate(key)}
-                  className={cx(
-                    'relative flex flex-col rounded-xl border-2 p-3 text-left transition-all',
-                    active ? 'border-brand-500 bg-brand-50/50 ring-4 ring-brand-500/10' : 'border-slate-200 hover:border-slate-300',
-                  )}
-                >
-                  {active && <CircleCheck size={18} className="absolute top-2.5 right-2.5 text-brand-600" />}
-                  <div className={cx('mb-3 flex h-16 items-end gap-1 rounded-lg bg-gradient-to-br p-2', TEMPLATE_ACCENTS[key] ?? TEMPLATE_ACCENTS.blank)}>
-                    {t.steps.map((_, i) => (
-                      <span key={i} className="flex h-full flex-1 flex-col gap-1 rounded bg-white/90 p-1">
-                        <span className="h-1 w-3/4 rounded bg-slate-300" />
-                        <span className="h-1 w-1/2 rounded bg-slate-200" />
-                        <span className="mt-auto h-1.5 w-full rounded bg-slate-400/60" />
-                      </span>
-                    ))}
-                  </div>
-                  <span className="text-sm font-semibold text-slate-900">{t.label}</span>
-                  <span className="mt-0.5 text-xs text-slate-500">{t.description}</span>
-                  <span className="mt-2 flex flex-wrap gap-1">
-                    {t.steps.map((s, i) => (
-                      <span key={i} className="inline-flex items-center gap-1 rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 ring-1 ring-slate-200">
-                        <FileText size={10} /> {s.name}
-                        <span className="text-slate-400">· {STEP_TYPE_LABELS[s.type]}</span>
-                      </span>
-                    ))}
-                  </span>
-                </button>
-              );
-            })}
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="min-w-[260px] flex-1">
+            <Field label="Nom du tunnel">
+              <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="ex. Guide gratuit marketing" />
+            </Field>
           </div>
+          <Chips
+            label="Point de départ"
+            value={source}
+            onChange={setSource}
+            options={[
+              ['kits', 'Kits'],
+              ['classic', 'Modèles classiques'],
+            ]}
+          />
         </div>
+
+        {source === 'kits' ? (
+          <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <div>
+              <div className="mb-3 flex flex-wrap items-center gap-3">
+                <Chips
+                  label="Objectif"
+                  value={goal}
+                  onChange={pickGoal}
+                  options={[['all', 'Tous'], ...(Object.keys(KIT_FLOWS) as KitGoal[]).map((g): [KitGoal, string] => [g, KIT_GOAL_LABELS[g]])]}
+                />
+                <div className="min-w-[180px] flex-1">
+                  <SearchBox value={query} onChange={setQuery} placeholder="Rechercher un kit (univers, style…)" />
+                </div>
+              </div>
+              <KitCards value={kit.id} onChange={setKitId} kits={kits} thumb={KIT_FLOWS[flow].steps[0]} width={178} />
+            </div>
+
+            <aside className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 lg:sticky lg:top-0">
+              <p className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-slate-900">Kit {kit.name}</span>
+                <KitSwatch kit={kit} />
+              </p>
+              <p className="mt-1 text-xs leading-snug text-slate-500">{kit.pitch}</p>
+              <p className="mt-4 mb-2 text-sm font-medium text-slate-700">Type de tunnel</p>
+              <div role="radiogroup" aria-label="Type de tunnel" className="space-y-1.5">
+                {(Object.keys(KIT_FLOWS) as KitGoal[]).map((g) => (
+                  <button
+                    key={g}
+                    type="button"
+                    role="radio"
+                    aria-checked={flow === g}
+                    data-flow={g}
+                    onClick={() => setFlow(g)}
+                    className={cx(
+                      'flex w-full items-start gap-2 rounded-lg border bg-white px-3 py-2 text-left transition-colors',
+                      flow === g ? 'border-brand-500 ring-2 ring-brand-500/15' : 'border-slate-200 hover:border-slate-300',
+                    )}
+                  >
+                    <span className={cx('mt-1 h-3 w-3 shrink-0 rounded-full border-2', flow === g ? 'border-brand-500 bg-brand-500' : 'border-slate-300')} />
+                    <span>
+                      <span className="block text-sm font-semibold text-slate-900">{KIT_FLOWS[g].label}</span>
+                      <span className="block text-xs text-slate-500">{KIT_FLOWS[g].description}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <p className="mt-4 mb-2 text-sm font-medium text-slate-700">
+                {KIT_FLOWS[flow].steps.length} étapes, toutes dans le kit {kit.name}
+              </p>
+              <KitFlowStrip kitId={kit.id} goal={flow} width={148} />
+            </aside>
+          </div>
+        ) : (
+          <div>
+            <p className="mb-2 text-sm font-medium text-slate-700">Modèle</p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {Object.entries(FUNNEL_TEMPLATES).map(([key, t]) => {
+                const active = template === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setTemplate(key)}
+                    className={cx(
+                      'relative flex flex-col rounded-xl border-2 p-3 text-left transition-all',
+                      active ? 'border-brand-500 bg-brand-50/50 ring-4 ring-brand-500/10' : 'border-slate-200 hover:border-slate-300',
+                    )}
+                  >
+                    {active && <CircleCheck size={18} className="absolute top-2.5 right-2.5 text-brand-600" />}
+                    <div className={cx('mb-3 flex h-16 items-end gap-1 rounded-lg bg-gradient-to-br p-2', TEMPLATE_ACCENTS[key] ?? TEMPLATE_ACCENTS.blank)}>
+                      {t.steps.map((_, i) => (
+                        <span key={i} className="flex h-full flex-1 flex-col gap-1 rounded bg-white/90 p-1">
+                          <span className="h-1 w-3/4 rounded bg-slate-300" />
+                          <span className="h-1 w-1/2 rounded bg-slate-200" />
+                          <span className="mt-auto h-1.5 w-full rounded bg-slate-400/60" />
+                        </span>
+                      ))}
+                    </div>
+                    <span className="text-sm font-semibold text-slate-900">{t.label}</span>
+                    <span className="mt-0.5 text-xs text-slate-500">{t.description}</span>
+                    <span className="mt-2 flex flex-wrap gap-1">
+                      {t.steps.map((s, i) => (
+                        <span key={i} className="inline-flex items-center gap-1 rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 ring-1 ring-slate-200">
+                          <FileText size={10} /> {s.name}
+                          <span className="text-slate-400">· {STEP_TYPE_LABELS[s.type]}</span>
+                        </span>
+                      ))}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </form>
     </Modal>
   );

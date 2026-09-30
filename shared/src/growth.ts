@@ -29,6 +29,8 @@ export interface LegalSettings {
 }
 
 export interface FunnelSettings {
+  /** Kit (visual identity, see kits/) the funnel was created with: new steps and legal pages follow it. */
+  kit?: string;
   tracking?: FunnelTracking;
   cookie_banner?: CookieBannerSettings;
   legal?: LegalSettings;
@@ -142,6 +144,7 @@ export interface FunnelExport {
     slug: string;
     /** Step references are indexes in `steps`. */
     settings: {
+      kit?: string;
       tracking?: FunnelTracking;
       cookie_banner?: Omit<CookieBannerSettings, 'privacy_step_id'> & { privacy_step?: number | null };
       legal?: { footer: boolean; steps: number[] };

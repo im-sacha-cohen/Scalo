@@ -270,6 +270,32 @@ export type Block =
 
 export type BlockType = Block['type'];
 
+/**
+ * Design tokens of a page / email (optional, set by the kits of `kits/`). They are only *defaults*: the renderer uses
+ * them where a block does not carry its own value (card background, borders, radii, button text…), so content
+ * without a theme renders exactly as before.
+ */
+export interface PageTheme {
+  /** Id of the kit the tokens come from (see kits/index.ts). */
+  kit?: string;
+  surface?: string;        // cards, form fields
+  surfaceText?: string;    // text on `surface`
+  border?: string;         // card / field borders, dividers, tracks
+  accentText?: string;     // text on the accent color (buttons, badges)
+  accent2?: string;        // secondary accent (stars, markers)
+  radius?: number;         // cards and fields, px
+  buttonRadius?: number;   // px
+  borderWidth?: number;    // cards and fields, px (default 1)
+  /** Card / button depth: none, soft drop shadow, or hard offset shadow with a solid outline. */
+  shadow?: 'none' | 'soft' | 'hard';
+  headingWeight?: number;  // 300..900
+  headingSpacing?: number; // letter-spacing of headings, px
+  headingCase?: 'upper';
+  buttonWeight?: number;
+  buttonSpacing?: number;  // px
+  buttonCase?: 'upper';
+}
+
 export interface PageSettings {
   background: string;
   contentBackground: string;
@@ -279,6 +305,7 @@ export interface PageSettings {
   accent: string;
   headingFont?: string;      // font stack for headings (defaults to fontFamily)
   contentPadding?: number;   // vertical padding of the page body, px (default 24 / 16 for emails)
+  theme?: PageTheme;         // design tokens (kits); optional
   // page only
   seoTitle?: string;
   seoDescription?: string;

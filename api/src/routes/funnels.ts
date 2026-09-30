@@ -2,7 +2,20 @@ import { Router } from 'express';
 import { sql } from 'kysely';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
-import { FUNNEL_TEMPLATES, stepTemplate, type Funnel, type PageContent, type Step, type StepAccess, type StepType } from '@scalo/shared';
+import {
+  FUNNEL_TEMPLATES,
+  getKit,
+  KIT_FLOWS,
+  kitFunnelSteps,
+  kitPageForStep,
+  stepTemplate,
+  type Funnel,
+  type KitGoal,
+  type PageContent,
+  type Step,
+  type StepAccess,
+  type StepType,
+} from '@scalo/shared';
 import { db, isUniqueViolation, nowIso, type Db, type FunnelRow, type StepRow } from '../db';
 import { HttpError, notFound, pageContentSchema, paramId, previewToken, slugify, uid } from '../util';
 import { readFunnelSettings } from '../services/tracking';
@@ -94,15 +107,30 @@ export async function withFreeSlug<T>(ex: Db, fn: (trx: Db) => Promise<T>): Prom
   }
 }
 
-export function createFunnel(userId: number, name: string, template: keyof typeof FUNNEL_TEMPLATES, createdAt = nowIso(), ex: Db = db) {
+/**
+ * `kit`: visual identity of the funnel (see shared/kits). Every step is then a page of that kit and the funnel
+ * remembers it (`funnels.settings.kit`). `kit.flow`: a funnel type of the kit (capture, vente, webinaire, lancement);
+ * without it the steps of `template` are created, in the kit.
+ */
+export function createFunnel(
+  userId: number,
+  name: string,
+  template: keyof typeof FUNNEL_TEMPLATES,
+  createdAt = nowIso(),
+  ex: Db = db,
+  kit?: { id: string; flow?: KitGoal },
+) {
   return withFreeSlug(ex, async (trx) => {
     const f = await trx
       .insertInto('funnels')
-      .values({ user_id: userId, name, slug: await uniqueFunnelSlug(name, trx), created_at: createdAt })
+      .values({ user_id: userId, name, slug: await uniqueFunnelSlug(name, trx), created_at: createdAt, ...(kit ? { settings: JSON.stringify({ kit: kit.id }) } : {}) })
       .returning('id')
       .executeTakeFirstOrThrow();
-    for (const s of FUNNEL_TEMPLATES[template].steps) {
-      await insertStep(trx, f.id, { name: s.name, type: s.type, content: stepTemplate(s.type), created_at: createdAt });
+    const steps: { name: string; type: StepType; content: PageContent }[] =
+      (kit?.flow && kitFunnelSteps(kit.id, kit.flow)) ||
+      FUNNEL_TEMPLATES[template].steps.map((s) => ({ name: s.name, type: s.type, content: (kit && kitPageForStep(kit.id, s.type)) || stepTemplate(s.type) }));
+    for (const s of steps) {
+      await insertStep(trx, f.id, { name: s.name, type: s.type, content: s.content, created_at: createdAt });
     }
     return f.id;
   });
@@ -208,7 +236,7 @@ async function reposition(ex: Db, funnelId: number) {
 
 funnelsRouter.get('/funnels', async (req, res) => {
   const { rows } = await sql<Funnel>`
-    SELECT f.id, f.name, f.slug, f.created_at,
+    SELECT f.id, f.name, f.slug, f.created_at, f.settings->>'kit' AS kit,
       (SELECT COUNT(*) FROM steps s WHERE s.funnel_id = f.id) AS steps_count,
       (SELECT COUNT(*) FROM page_views v WHERE v.funnel_id = f.id) AS views,
       (SELECT COUNT(*) FROM contact_events e WHERE e.funnel_id = f.id AND e.type = 'optin') AS optins
@@ -219,9 +247,17 @@ funnelsRouter.get('/funnels', async (req, res) => {
 funnelsRouter.post('/funnels', async (req, res) => {
   const userId = uid(req);
   const body = z
-    .object({ name: z.string().trim().min(1).max(120), template: z.enum(['optin', 'sales', 'blank']).default('blank') })
+    .object({
+      name: z.string().trim().min(1).max(120),
+      template: z.enum(['optin', 'sales', 'blank']).default('blank'),
+      // optional: a kit (every step uses its pages) and one of its funnel types
+      kit: z.string().trim().max(40).optional(),
+      flow: z.enum(Object.keys(KIT_FLOWS) as [KitGoal, ...KitGoal[]]).optional(),
+    })
     .parse(req.body);
-  const id = await createFunnel(userId, body.name, body.template);
+  if (body.kit !== undefined && !getKit(body.kit)) throw new HttpError(400, 'Kit inconnu');
+  if (body.flow && !body.kit) throw new HttpError(400, 'Choisissez un kit pour ce type de tunnel');
+  const id = await createFunnel(userId, body.name, body.template, undefined, undefined, body.kit ? { id: body.kit, flow: body.flow } : undefined);
   res.status(201).json(await funnelDetail(await ownedFunnel(userId, id)));
 });
 
@@ -258,10 +294,17 @@ funnelsRouter.delete('/funnels/:id', async (req, res) => {
 funnelsRouter.post('/funnels/:id/duplicate', async (req, res) => {
   const userId = uid(req);
   const f = await ownedFunnel(userId, req.params.id);
+  const kitOfFunnel = readFunnelSettings(f.settings).kit; // the copy stays in the same kit
   const newId = await withFreeSlug(db, async (trx) => {
     const copy = await trx
       .insertInto('funnels')
-      .values({ user_id: userId, name: `${f.name} (copie)`, slug: await uniqueFunnelSlug(`${f.slug}-copie`, trx), created_at: nowIso() })
+      .values({
+        user_id: userId,
+        name: `${f.name} (copie)`,
+        slug: await uniqueFunnelSlug(`${f.slug}-copie`, trx),
+        created_at: nowIso(),
+        ...(kitOfFunnel ? { settings: JSON.stringify({ kit: kitOfFunnel }) } : {}),
+      })
       .returning('id')
       .executeTakeFirstOrThrow();
     const steps = await trx.selectFrom('steps').selectAll().where('funnel_id', '=', f.id).orderBy('position').orderBy('id').execute();
@@ -289,7 +332,9 @@ funnelsRouter.post('/funnels/:id/steps', async (req, res) => {
     .object({ name: z.string().trim().min(1).max(120), type: z.enum(STEP_TYPES), content: pageContentSchema.optional() })
     .parse(req.body);
   // `content`: page chosen in the template gallery (otherwise the default template of the step type)
-  const content = (body.content as unknown as PageContent | undefined) ?? stepTemplate(body.type);
+  // without a chosen page, a funnel created from a kit gets the kit's page for this type
+  const kitId = readFunnelSettings(f.settings).kit;
+  const content = (body.content as unknown as PageContent | undefined) ?? (kitId ? kitPageForStep(kitId, body.type) : null) ?? stepTemplate(body.type);
   const id = await db.transaction().execute((trx) => insertStep(trx, f.id, { name: body.name, type: body.type, content }));
   const s = await ownedStep(userId, id);
   res.status(201).json(toStep(s, s.funnel_slug, { views: 0, optins: 0 }));

@@ -100,6 +100,8 @@ export function safeSrc(u: unknown, ctx?: Pick<RenderContext, 'baseUrl' | 'mode'
   if (/^https?:\/\//i.test(probe)) return url;
   if (/^\/(?!\/)/.test(probe)) return ctx?.baseUrl ? ctx.baseUrl.replace(/\/+$/, '') + url : url;
   if (/^\/\//.test(probe)) return 'https:' + url;
+  // Inline SVG illustrations (kits): an <img> / CSS background never runs scripts. Not in emails (Gmail drops them).
+  if (ctx?.mode !== 'email' && /^data:image\/svg\+xml[;,][\w%.,;=:/+*!~-]+$/i.test(probe) && probe.length <= 20000) return probe;
   return '';
 }
 
@@ -337,6 +339,70 @@ const editAttr = (ctx: RenderContext, field: string) => (ctx.mode === 'editor' ?
 const accentOf = (ctx: RenderContext) => safeColor(ctx.settings.accent) ?? '#2563eb';
 const textColorOf = (ctx: RenderContext) => safeColor(ctx.settings.textColor) ?? '#0f172a';
 
+// ---------- theme (design tokens of `settings.theme`, see PageTheme) ----------
+
+export interface ResolvedTheme {
+  surface?: string;
+  surfaceText?: string;
+  border?: string;
+  accentText?: string;
+  accent2?: string;
+  radius?: number;
+  buttonRadius?: number;
+  borderWidth?: number;
+  shadow?: 'none' | 'soft' | 'hard';
+  headingWeight?: number;
+  headingSpacing?: number;
+  headingCase?: 'uppercase';
+  buttonWeight?: number;
+  buttonSpacing?: number;
+  buttonCase?: 'uppercase';
+}
+const themeCache = new WeakMap<object, ResolvedTheme>();
+
+/** Sanitized tokens of the page, or null when the content has no theme (then nothing changes in the output). */
+export function themeOf(ctx: Pick<RenderContext, 'settings'>): ResolvedTheme | null {
+  const raw = ctx.settings?.theme as unknown;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const hit = themeCache.get(raw);
+  if (hit) return hit;
+  const t = raw as Record<string, unknown>;
+  const th: ResolvedTheme = {
+    surface: safeColor(t.surface),
+    surfaceText: safeColor(t.surfaceText),
+    border: safeColor(t.border),
+    accentText: safeColor(t.accentText),
+    accent2: safeColor(t.accent2),
+    radius: optNum(t.radius, 0, 60),
+    buttonRadius: optNum(t.buttonRadius, 0, 100),
+    borderWidth: optNum(t.borderWidth, 0, 6),
+    shadow: t.shadow === 'none' || t.shadow === 'soft' || t.shadow === 'hard' ? t.shadow : undefined,
+    headingWeight: optNum(t.headingWeight, 100, 900),
+    headingSpacing: optNum(t.headingSpacing, -10, 30),
+    headingCase: t.headingCase === 'upper' ? 'uppercase' : undefined,
+    buttonWeight: optNum(t.buttonWeight, 100, 900),
+    buttonSpacing: optNum(t.buttonSpacing, -10, 30),
+    buttonCase: t.buttonCase === 'upper' ? 'uppercase' : undefined,
+  };
+  themeCache.set(raw, th);
+  return th;
+}
+
+/** Border and shadow of a themed card (testimonial, pricing, colored column). */
+function themedCard(th: ResolvedTheme, ctx: RenderContext, highlight?: string) {
+  const hard = th.shadow === 'hard';
+  const bw = hard ? Math.max(2, th.borderWidth ?? 2) : (th.borderWidth ?? 1);
+  const line = hard ? textColorOf(ctx) : (th.border ?? '#e2e8f0');
+  return {
+    border: highlight ? `${Math.max(2, bw)}px solid ${highlight}` : bw ? `${bw}px solid ${line}` : undefined,
+    boxShadow:
+      ctx.mode === 'email' || th.shadow === 'none' ? undefined
+      : hard ? `6px 6px 0 ${highlight ?? textColorOf(ctx)}`
+      : th.shadow === 'soft' ? '0 18px 40px -24px rgba(15,23,42,0.35)'
+      : undefined,
+  };
+}
+
 function videoEmbed(url: string): string | null {
   const yt = url.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{6,})/);
   if (yt) return `https://www.youtube.com/embed/${yt[1]}`;
@@ -356,30 +422,39 @@ function buttonHtml(
   opts: { label: string; href: string; bg?: string; color?: string; radius?: number; full?: boolean; size?: 'sm' | 'md' | 'lg'; outline?: boolean; fontSize?: number; fontWeight?: number; newTab?: boolean; edit?: string; align?: string },
   ctx: RenderContext,
 ) {
+  const th = themeOf(ctx);
   const bg = safeColor(opts.bg) ?? accentOf(ctx);
-  const fg = safeColor(opts.color) ?? (opts.outline ? bg : '#ffffff');
+  // the theme's "text on accent" only applies to buttons painted with the accent itself
+  const fg = safeColor(opts.color) ?? (opts.outline ? bg : ((!safeColor(opts.bg) || safeColor(opts.bg) === accentOf(ctx)) && th?.accentText) || '#ffffff');
   const pad = opts.size === 'sm' ? '11px 22px' : opts.size === 'lg' ? '20px 40px' : '16px 32px';
-  const fs = opts.fontSize ?? (opts.size === 'sm' ? 15 : opts.size === 'lg' ? 20 : 18);
-  const radius = num(opts.radius, 8, 0, 100);
+  const upper = th?.buttonCase;
+  const fs = opts.fontSize ?? Math.round((opts.size === 'sm' ? 15 : opts.size === 'lg' ? 20 : 18) * (upper ? 0.82 : 1));
+  const radius = num(opts.radius, th?.buttonRadius ?? 8, 0, 100);
+  const weight = opts.fontWeight ?? th?.buttonWeight ?? 700;
+  const hard = th?.shadow === 'hard' && !opts.outline;
+  const hardLine = hard ? `2px solid ${textColorOf(ctx)}` : undefined;
   const label = `<span${opts.edit ? editAttr(ctx, opts.edit) : ''}>${opts.label}</span>`;
   if (ctx.mode === 'email') {
     // bulletproof button: the table cell carries the background (Outlook), the link is padded for clicks.
     const align = opts.align === 'left' || opts.align === 'right' ? opts.align : 'center';
-    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0"${opts.full ? ' width="100%"' : ''} align="${align}" style="${css({ margin: align === 'center' ? '0 auto' : undefined, borderCollapse: 'separate' })}"><tr><td align="center" bgcolor="${esc(opts.outline ? '' : bg)}" style="${css({ borderRadius: radius, background: opts.outline ? undefined : bg, border: opts.outline ? `2px solid ${bg}` : undefined })}"><a href="${esc(opts.href)}" target="_blank" style="${css({ display: 'block', padding: pad, fontSize: fs, fontWeight: opts.fontWeight ?? 700, color: fg, textDecoration: 'none', borderRadius: radius, fontFamily: 'inherit', lineHeight: 1.2 })}">${label}</a></td></tr></table>`;
+    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0"${opts.full ? ' width="100%"' : ''} align="${align}" style="${css({ margin: align === 'center' ? '0 auto' : undefined, borderCollapse: 'separate' })}"><tr><td align="center" bgcolor="${esc(opts.outline ? '' : bg)}" style="${css({ borderRadius: radius, background: opts.outline ? undefined : bg, border: opts.outline ? `2px solid ${bg}` : hardLine })}"><a href="${esc(opts.href)}" target="_blank" style="${css({ display: 'block', padding: pad, fontSize: fs, fontWeight: weight, color: fg, textDecoration: 'none', borderRadius: radius, fontFamily: 'inherit', lineHeight: 1.2, textTransform: upper, letterSpacing: th?.buttonSpacing })}">${label}</a></td></tr></table>`;
   }
   const style = css({
     display: opts.full ? 'block' : 'inline-block',
     background: opts.outline ? 'transparent' : bg,
     color: fg,
-    border: opts.outline ? `2px solid ${bg}` : undefined,
+    border: opts.outline ? `2px solid ${bg}` : hardLine,
     padding: pad,
     borderRadius: radius,
-    fontWeight: opts.fontWeight ?? 700,
+    fontWeight: weight,
     fontSize: fs,
     lineHeight: 1.2,
     textDecoration: 'none',
     textAlign: 'center',
     fontFamily: 'inherit',
+    textTransform: upper,
+    letterSpacing: th?.buttonSpacing,
+    boxShadow: hard ? `4px 4px 0 ${textColorOf(ctx)}` : undefined,
   });
   if (ctx.mode === 'editor') return `<span class="scalo-btn" style="${style}">${label}</span>`;
   return `<a class="scalo-btn" href="${esc(opts.href)}"${opts.newTab ? ' target="_blank" rel="noopener"' : ''} style="${style}">${label}</a>`;
@@ -450,8 +525,13 @@ export function sectionParts(b: SectionBlock, ctx: RenderContext, topLevel: bool
   const overlayColor = safeColor(b.overlayColor);
   const cls = ['scalo-sec', ...visibilityClasses(s)];
   if (b.fullWidth && topLevel && ctx.mode !== 'email') cls.push('scalo-full');
+  // themed pages: generous desktop paddings are tightened on phones (class + custom properties, see builderCss)
+  const tight = themeOf(ctx) && ctx.mode !== 'email' && (box.paddingTop > 56 || box.paddingBottom > 56);
+  if (tight) cls.push('scalo-mpy');
+  const mpy = (v: number) => `${v > 56 ? Math.max(48, Math.round(v * 0.6)) : v}px`;
   const outer = css({
     position: 'relative',
+    ...(tight ? { '--scalo-mpt': mpy(box.paddingTop), '--scalo-mpb': mpy(box.paddingBottom) } : {}),
     ...box,
     backgroundColor: box.background,
     background: undefined,
@@ -487,6 +567,7 @@ export interface ColumnsParts {
 
 export function columnsParts(b: ColumnsBlock, _ctx: RenderContext): ColumnsParts {
   const s = b.style ?? {};
+  const th = themeOf(_ctx);
   const box = boxStyle(s, { py: 8, px: 24 });
   const gap = num(b.gap, 24, 0, 120);
   const valign = b.valign ?? 'top';
@@ -508,7 +589,11 @@ export function columnsParts(b: ColumnsBlock, _ctx: RenderContext): ColumnsParts
       minWidth: 0,
       background: safeColor(c?.background),
       padding: optNum(c?.padding, 0, 200),
-      borderRadius: safeColor(c?.background) ? 8 : undefined,
+      // themed pages: roomy cards are tightened on phones (see builderCss)
+      ...(th && (optNum(c?.padding, 0, 200) ?? 0) > 24 ? { '--scalo-mcp': '24px' } : {}),
+      borderRadius: safeColor(c?.background) ? (th?.radius ?? 8) : undefined,
+      // themed pages: a colored column is a card
+      ...(th && safeColor(c?.background) ? themedCard(th, _ctx) : {}),
       display: valign !== 'top' ? 'flex' : undefined,
       flexDirection: valign !== 'top' ? 'column' : undefined,
       justifyContent: valign === 'center' ? 'center' : valign === 'bottom' ? 'flex-end' : undefined,
@@ -554,6 +639,7 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
   const s: BlockStyle = b.style && typeof b.style === 'object' ? b.style : {};
   const { settings } = ctx;
   const accent = accentOf(ctx);
+  const th = themeOf(ctx);
   const isEmail = ctx.mode === 'email';
   const wrap = (inner: string, extra?: { align?: boolean }) => wrapLeaf(b, ctx, inner, extra);
 
@@ -563,7 +649,7 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
       const t = typo(s, HEADING_SIZES[level]);
       const mf = mobileFont(s);
       return wrap(
-        `<h${level}${clsAttr(mf.cls)}${editAttr(ctx, 'text')} style="${css({ margin: 0, fontSize: t.fontSize, lineHeight: t.lineHeight ?? 1.2, fontWeight: t.fontWeight ?? 800, letterSpacing: t.letterSpacing, color: 'inherit', fontFamily: settings.headingFont || 'inherit', ...mf.vars })}">${rich(b.text, ctx)}</h${level}>`,
+        `<h${level}${clsAttr(mf.cls)}${editAttr(ctx, 'text')} style="${css({ margin: 0, fontSize: t.fontSize, lineHeight: t.lineHeight ?? 1.2, fontWeight: t.fontWeight ?? th?.headingWeight ?? 800, letterSpacing: t.letterSpacing ?? th?.headingSpacing, textTransform: th?.headingCase, color: 'inherit', fontFamily: settings.headingFont || 'inherit', ...mf.vars })}">${rich(b.text, ctx)}</h${level}>`,
       );
     }
     case 'text': {
@@ -602,10 +688,11 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
     }
     case 'form': {
       if (isEmail) return '';
-      const radius = num(b.inputRadius, 8, 0, 40);
+      const radius = num(b.inputRadius, th?.radius ?? 8, 0, 40);
       const input = css({
         display: 'block', width: '100%', boxSizing: 'border-box', padding: '14px 16px', margin: '0 0 12px',
-        border: '1px solid #cbd5e1', borderRadius: radius, fontSize: 16, fontFamily: 'inherit', background: '#fff', color: '#0f172a',
+        border: th ? `${th.shadow === 'hard' ? 2 : Math.max(1, th.borderWidth ?? 1)}px solid ${th.shadow === 'hard' ? textColorOf(ctx) : (th.border ?? '#cbd5e1')}` : '1px solid #cbd5e1',
+        borderRadius: radius, fontSize: 16, fontFamily: 'inherit', background: th?.surface ?? '#fff', color: th?.surfaceText ?? '#0f172a',
       });
       const fields = arr<FormFieldLike>(b.fields)
         .filter((f) => f && (['email', 'first_name', 'last_name', 'phone'].includes(f.name) || CUSTOM_INPUT_RE.test(str(f.name))))
@@ -617,8 +704,9 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
         })
         .join('');
       const btn = css({
-        display: 'block', width: '100%', padding: '16px', border: 0, borderRadius: radius, cursor: 'pointer',
-        background: safeColor(b.buttonBg) ?? accent, color: safeColor(b.buttonColor) ?? '#fff', fontWeight: 700, fontSize: 18, fontFamily: 'inherit',
+        display: 'block', width: '100%', padding: '16px', border: th?.shadow === 'hard' ? `2px solid ${textColorOf(ctx)}` : 0, borderRadius: th?.buttonRadius !== undefined && b.inputRadius === undefined ? Math.min(th.buttonRadius, 40) : radius, cursor: 'pointer',
+        background: safeColor(b.buttonBg) ?? accent, color: safeColor(b.buttonColor) ?? th?.accentText ?? '#fff', fontWeight: th?.buttonWeight ?? 700, fontSize: th?.buttonCase ? 15 : 18, fontFamily: 'inherit',
+        textTransform: th?.buttonCase, letterSpacing: th?.buttonSpacing, boxShadow: th?.shadow === 'hard' ? `4px 4px 0 ${textColorOf(ctx)}` : undefined,
       });
       const hidden = `<input type="hidden" name="_block" value="${esc(b.id)}">`;
       return wrap(
@@ -655,7 +743,7 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
     }
     case 'divider': {
       const w = num(b.width, 100, 5, 100);
-      return wrap(`<hr style="${css({ border: 0, borderTop: `${num(b.thickness, 1, 1, 20)}px ${['dashed', 'dotted'].includes(str(b.lineStyle)) ? b.lineStyle : 'solid'} ${safeColor(b.color) ?? '#e2e8f0'}`, margin: '0 auto', width: `${w}%` })}">`);
+      return wrap(`<hr style="${css({ border: 0, borderTop: `${num(b.thickness, 1, 1, 20)}px ${['dashed', 'dotted'].includes(str(b.lineStyle)) ? b.lineStyle : 'solid'} ${safeColor(b.color) ?? th?.border ?? '#e2e8f0'}`, margin: '0 auto', width: `${w}%` })}">`);
     }
 
     case 'section': {
@@ -696,7 +784,7 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
             const pct = Math.round((num(c?.width, 50, 1, 100) / total) * 1000) / 10;
             const padL = i === 0 ? 0 : gap / 2;
             const padR = i === cols.length - 1 ? 0 : gap / 2;
-            return `<td class="scalo-col" width="${pct}%" valign="${valign}" style="${css({ width: `${pct}%`, verticalAlign: valign, padding: `0 ${padR}px 0 ${padL}px` })}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="${css({ background: safeColor(c?.background), padding: optNum(c?.padding, 0, 200), borderRadius: safeColor(c?.background) ? 8 : undefined })}">${renderBlocks(arr<Block>(c?.children), childCtx)}</td></tr></table></td>`;
+            return `<td class="scalo-col" width="${pct}%" valign="${valign}" style="${css({ width: `${pct}%`, verticalAlign: valign, padding: `0 ${padR}px 0 ${padL}px` })}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="${css({ background: safeColor(c?.background), padding: optNum(c?.padding, 0, 200), borderRadius: safeColor(c?.background) ? (th?.radius ?? 8) : undefined, border: th && safeColor(c?.background) ? themedCard(th, ctx).border : undefined })}">${renderBlocks(arr<Block>(c?.children), childCtx)}</td></tr></table></td>`;
           })
           .join('');
         return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"${clsAttr(visibilityClasses(s))} style="${css({ marginTop: box.marginTop, marginBottom: box.marginBottom })}"><tr><td style="${css({ padding: `${box.paddingTop}px ${box.paddingRight}px ${box.paddingBottom}px ${box.paddingLeft}px`, background: box.background, borderRadius: box.borderRadius, border: box.border })}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="scalo-cols"><tr>${tds}</tr></table></td></tr></table>`;
@@ -713,14 +801,15 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
       const minutes = num(b.minutes, 30, 1, 60 * 24 * 365);
       const end = evergreen ? now + minutes * 60_000 : Date.parse(str(b.date)) || now + 3 * 86400_000;
       const p = countdownParts(end - now);
-      const boxBg = safeColor(b.boxBg) ?? '#0f172a';
-      const boxFg = safeColor(b.boxColor) ?? '#ffffff';
+      const boxBg = safeColor(b.boxBg) ?? (th ? textColorOf(ctx) : '#0f172a');
+      const boxFg = safeColor(b.boxColor) ?? (th ? (safeColor(settings.contentBackground) ?? '#ffffff') : '#ffffff');
+      const boxRadius = th?.radius !== undefined ? Math.min(th.radius, 12) : undefined;
       const labels = b.showLabels !== false;
       const t = typo(s, 34);
       const unit = (k: 'd' | 'h' | 'm' | 's', v: number, label: string) =>
         isEmail
-          ? `<td style="padding:0 4px"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="${esc(boxBg)}" style="${css({ background: boxBg, color: boxFg, borderRadius: 10, padding: '12px 14px', minWidth: 56, fontSize: t.fontSize, fontWeight: 800, fontFamily: 'inherit', lineHeight: 1 })}">${pad2(v)}${labels ? `<div style="${css({ fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', opacity: 0.75, paddingTop: 6 })}">${label}</div>` : ''}</td></tr></table></td>`
-          : `<div style="${css({ display: 'inline-block', background: boxBg, color: boxFg, borderRadius: 12, padding: '14px 10px 12px', minWidth: 76, margin: '4px', textAlign: 'center', verticalAlign: 'top' })}"><div data-u="${k}" style="${css({ fontSize: t.fontSize, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' })}">${pad2(v)}</div>${labels ? `<div style="${css({ fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', opacity: 0.75, marginTop: 6 })}">${label}</div>` : ''}</div>`;
+          ? `<td style="padding:0 4px"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="${esc(boxBg)}" style="${css({ background: boxBg, color: boxFg, borderRadius: boxRadius ?? 10, padding: '12px 14px', minWidth: 56, fontSize: t.fontSize, fontWeight: 800, fontFamily: 'inherit', lineHeight: 1 })}">${pad2(v)}${labels ? `<div style="${css({ fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', opacity: 0.75, paddingTop: 6 })}">${label}</div>` : ''}</td></tr></table></td>`
+          : `<div style="${css({ display: 'inline-block', background: boxBg, color: boxFg, borderRadius: boxRadius ?? 12, padding: th ? '12px 6px 10px' : '14px 10px 12px', minWidth: th ? 60 : 76, margin: th ? '3px' : '4px', textAlign: 'center', verticalAlign: 'top' })}"><div data-u="${k}" style="${css({ fontSize: t.fontSize, fontWeight: th?.headingWeight ?? 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums', fontFamily: th ? settings.headingFont : undefined })}">${pad2(v)}</div>${labels ? `<div style="${css({ fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', opacity: 0.75, marginTop: 6 })}">${label}</div>` : ''}</div>`;
       const units = unit('d', p.d, 'Jours') + unit('h', p.h, 'Heures') + unit('m', p.m, 'Min') + unit('s', p.s, 'Sec');
       if (isEmail) return wrap(`<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto"><tr>${units}</tr></table>`);
       const attrs = ctx.mode === 'page'
@@ -732,7 +821,7 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
       const stars = Math.round(num(b.stars, 5, 0, 5));
       const photo = safeSrc(b.photo, ctx);
       const card = b.layout !== 'plain';
-      const starsHtml = stars ? `<div style="${css({ color: '#f59e0b', fontSize: 18, letterSpacing: 2, marginBottom: 12 })}">${'★'.repeat(stars)}<span style="color:#e2e8f0">${'★'.repeat(5 - stars)}</span></div>` : '';
+      const starsHtml = stars ? `<div style="${css({ color: th?.accent2 ?? '#f59e0b', fontSize: 18, letterSpacing: 2, marginBottom: 12 })}">${'★'.repeat(stars)}<span style="color:${esc(th?.border ?? '#e2e8f0')}">${'★'.repeat(5 - stars)}</span></div>` : '';
       const quote = `<div style="${css({ fontSize: num(s.fontSize, 18, 10, 60), lineHeight: 1.6, fontStyle: 'italic', marginBottom: 18 })}">“<span${editAttr(ctx, 'quote')}>${rich(b.quote, ctx)}</span>”</div>`;
       const who = `<div${editAttr(ctx, 'name')} style="${css({ fontWeight: 700, fontSize: 16 })}">${plain(b.name, ctx)}</div>${b.role ? `<div style="${css({ fontSize: 14, opacity: 0.65, marginTop: 2 })}">${plain(b.role, ctx)}</div>` : ''}`;
       const img = (sz: number) => (photo ? `<img src="${esc(photo)}" alt="${esc(b.name)}" width="${sz}" height="${sz}" style="${css({ width: sz, height: sz, borderRadius: sz, objectFit: 'cover', display: 'block', border: 0 })}">` : '');
@@ -741,8 +830,10 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
         ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0"${align === 'center' ? ' align="center"' : ''}><tr>${photo ? `<td style="padding-right:12px" valign="middle">${img(48)}</td>` : ''}<td valign="middle" style="text-align:left">${who}</td></tr></table>`
         : `<div style="${css({ display: 'flex', alignItems: 'center', gap: 12, justifyContent: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start', textAlign: 'left' })}">${img(48)}<div>${who}</div></div>`;
       const body = `${starsHtml}${quote}${person}`;
-      const cardBg = safeColor(b.cardBg) ?? '#ffffff';
-      const cardStyle = card ? css({ background: cardBg, border: '1px solid #e2e8f0', borderRadius: 16, padding: 28, boxShadow: isEmail ? undefined : '0 10px 30px -18px rgba(15,23,42,0.25)', color: 'inherit' }) : '';
+      const cardBg = safeColor(b.cardBg) ?? th?.surface ?? '#ffffff';
+      const cardStyle = !card ? ''
+        : th ? css({ background: cardBg, borderRadius: th.radius ?? 16, padding: 28, color: safeColor(b.cardBg) ? 'inherit' : (th.surfaceText ?? 'inherit'), ...themedCard(th, ctx) })
+        : css({ background: cardBg, border: '1px solid #e2e8f0', borderRadius: 16, padding: 28, boxShadow: isEmail ? undefined : '0 10px 30px -18px rgba(15,23,42,0.25)', color: 'inherit' });
       return wrap(card ? (isEmail ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="${cardStyle}">${body}</td></tr></table>` : `<div style="${cardStyle}">${body}</div>`) : body);
     }
     case 'pricing': {
@@ -752,9 +843,14 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
         .map((f, i) => `<li style="${css({ listStyle: 'none', padding: '7px 0', borderBottom: '1px solid rgba(148,163,184,0.18)', display: 'block' })}"><span style="${css({ color: ac, fontWeight: 800, marginRight: 10 })}">✓</span><span${editAttr(ctx, `features.${i}`)}>${rich(f, ctx)}</span></li>`)
         .join('');
       const href = b.action === 'next' && !isEmail ? ctx.nextUrl ?? '#' : safeUrl(b.url);
-      const badge = hl && b.badge ? `<div style="${css({ display: 'inline-block', background: ac, color: '#fff', fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', padding: '5px 12px', borderRadius: 999, marginBottom: 14 })}">${plain(b.badge, ctx)}</div>` : '';
-      const body = `${badge}<div${editAttr(ctx, 'title')} style="${css({ fontSize: 20, fontWeight: 700 })}">${plain(b.title, ctx)}</div>${b.description ? `<div${editAttr(ctx, 'description')} style="${css({ fontSize: 15, opacity: 0.7, marginTop: 6 })}">${rich(b.description, ctx)}</div>` : ''}<div style="${css({ margin: '18px 0 20px' })}"><span${editAttr(ctx, 'price')} style="${css({ fontSize: 48, fontWeight: 800, lineHeight: 1, letterSpacing: -1 })}">${plain(b.price, ctx)}</span>${b.period ? `<span style="${css({ fontSize: 16, opacity: 0.6, marginLeft: 6 })}">${plain(b.period, ctx)}</span>` : ''}</div><ul style="${css({ margin: '0 0 24px', padding: 0, textAlign: 'left', fontSize: 16 })}">${features}</ul>${buttonHtml({ label: plain(b.buttonLabel, ctx), href, bg: ac, full: true, radius: 10, size: 'md', outline: !hl, edit: 'buttonLabel' }, ctx)}`;
-      const cardStyle = css({
+      const badge = hl && b.badge ? `<div style="${css({ display: 'inline-block', background: ac, color: (ac === accent && th?.accentText) || '#fff', fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', padding: '5px 12px', borderRadius: 999, marginBottom: 14 })}">${plain(b.badge, ctx)}</div>` : '';
+      const body = `${badge}<div${editAttr(ctx, 'title')} style="${css({ fontSize: 20, fontWeight: 700 })}">${plain(b.title, ctx)}</div>${b.description ? `<div${editAttr(ctx, 'description')} style="${css({ fontSize: 15, opacity: 0.7, marginTop: 6 })}">${rich(b.description, ctx)}</div>` : ''}<div style="${css({ margin: '18px 0 20px' })}"><span${editAttr(ctx, 'price')} style="${css({ fontSize: 48, fontWeight: th?.headingWeight ?? 800, lineHeight: 1, letterSpacing: -1, fontFamily: th ? settings.headingFont : undefined })}">${plain(b.price, ctx)}</span>${b.period ? `<span style="${css({ fontSize: 16, opacity: 0.6, marginLeft: 6 })}">${plain(b.period, ctx)}</span>` : ''}</div><ul style="${css({ margin: '0 0 24px', padding: 0, textAlign: 'left', fontSize: 16 })}">${features}</ul>${buttonHtml({ label: plain(b.buttonLabel, ctx), href, bg: ac, full: true, radius: th ? undefined : 10, size: 'md', outline: !hl, edit: 'buttonLabel' }, ctx)}`;
+      const cardStyle = th
+        ? css({
+            background: safeColor(b.cardBg) ?? th.surface ?? '#ffffff', color: safeColor(b.cardBg) ? '#0f172a' : (th.surfaceText ?? '#0f172a'), borderRadius: th.radius ?? 18, padding: '32px 28px', textAlign: 'center',
+            maxWidth: 420, margin: '0 auto', ...themedCard(th, ctx, hl ? ac : undefined),
+          })
+        : css({
         background: safeColor(b.cardBg) ?? '#ffffff', color: '#0f172a', border: hl ? `2px solid ${ac}` : '1px solid #e2e8f0', borderRadius: 18, padding: '32px 28px', textAlign: 'center',
         boxShadow: isEmail ? undefined : hl ? '0 24px 50px -20px rgba(15,23,42,0.35)' : '0 10px 30px -20px rgba(15,23,42,0.2)', maxWidth: 420, margin: '0 auto',
       });
@@ -779,8 +875,11 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
       const iconBg = safeColor(b.iconBg) ?? (/^#[0-9a-f]{6}$/i.test(accent) ? `${accent}1a` : '#eef2ff');
       const left = b.layout === 'left';
       const align = s.align ?? (left ? 'left' : 'center');
-      const icon = `<div style="${css({ width: size, height: size, lineHeight: `${size}px`, borderRadius: Math.round(size * 0.28), background: iconBg, fontSize: Math.round(size * 0.5), textAlign: 'center', display: 'inline-block', flexShrink: 0 })}">${esc(str(b.icon, '✨').slice(0, 8))}</div>`;
-      const title = `<div${editAttr(ctx, 'title')} style="${css({ fontWeight: 700, fontSize: num(s.fontSize, 19, 10, 60), margin: left ? '0 0 6px' : '16px 0 8px', lineHeight: 1.3 })}">${plain(b.title, ctx)}</div>`;
+      // themed pages: the icon can be a short label ("01", "A") drawn in the accent color with the heading font
+      const glyph = str(b.icon, '✨').slice(0, 8);
+      const label = !!th && /^[\w+#&.→↗✓·-]{1,3}$/.test(glyph);
+      const icon = `<div style="${css({ width: size, height: size, lineHeight: `${size}px`, borderRadius: th?.radius !== undefined ? Math.min(th.radius, Math.round(size / 2)) : Math.round(size * 0.28), background: iconBg, fontSize: Math.round(size * (label ? 0.36 : 0.5)), textAlign: 'center', display: 'inline-block', flexShrink: 0, ...(label ? { color: accent, fontWeight: th.headingWeight ?? 700, fontFamily: settings.headingFont } : {}) })}">${esc(glyph)}</div>`;
+      const title = `<div${editAttr(ctx, 'title')} style="${css({ fontWeight: th?.headingWeight ?? 700, fontFamily: th ? settings.headingFont : undefined, fontSize: num(s.fontSize, 19, 10, 60), margin: left ? '0 0 6px' : '16px 0 8px', lineHeight: 1.3 })}">${plain(b.title, ctx)}</div>`;
       const text = `<div${editAttr(ctx, 'text')} style="${css({ fontSize: 15.5, lineHeight: 1.6, opacity: 0.8 })}">${rich(b.text, ctx)}</div>`;
       if (left) {
         return wrap(
@@ -804,12 +903,12 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
       const src = safeSrc(b.src, ctx);
       const iw = num(b.imageWidth, 45, 20, 70);
       const right = b.imagePosition === 'right';
-      const radius = num(b.radius, 14, 0, 200);
+      const radius = num(b.radius, th?.radius ?? 14, 0, 200);
       const img = src
         ? `<img src="${esc(src)}" alt="${esc(b.alt)}"${isEmail ? ` width="${Math.round(((num(settings.maxWidth, 600, 200, 1200) - 48) * iw) / 100)}"` : ''} style="${css({ width: '100%', height: 'auto', display: 'block', borderRadius: radius, border: 0 })}">`
         : ctx.mode === 'editor' ? placeholder('Image') : '';
       const href = b.buttonAction === 'next' && !isEmail ? ctx.nextUrl ?? '#' : safeUrl(b.buttonUrl);
-      const text = `${b.title ? `<h3${editAttr(ctx, 'title')} style="${css({ margin: '0 0 12px', fontSize: 26, lineHeight: 1.25, fontWeight: 800, fontFamily: settings.headingFont || 'inherit' })}">${plain(b.title, ctx)}</h3>` : ''}<div${editAttr(ctx, 'text')} style="${css({ fontSize: num(s.fontSize, 17, 10, 40), lineHeight: 1.65 })}">${rich(b.text, ctx)}</div>${b.buttonLabel ? `<div style="margin-top:20px">${buttonHtml({ label: plain(b.buttonLabel, ctx), href, size: 'md', radius: 10, edit: 'buttonLabel', align: 'left' }, ctx)}</div>` : ''}`;
+      const text = `${b.title ? `<h3${editAttr(ctx, 'title')} style="${css({ margin: '0 0 12px', fontSize: 26, lineHeight: 1.25, fontWeight: th?.headingWeight ?? 800, letterSpacing: th?.headingSpacing, textTransform: th?.headingCase, fontFamily: settings.headingFont || 'inherit' })}">${plain(b.title, ctx)}</h3>` : ''}<div${editAttr(ctx, 'text')} style="${css({ fontSize: num(s.fontSize, 17, 10, 40), lineHeight: 1.65 })}">${rich(b.text, ctx)}</div>${b.buttonLabel ? `<div style="margin-top:20px">${buttonHtml({ label: plain(b.buttonLabel, ctx), href, size: 'md', radius: th ? undefined : 10, edit: 'buttonLabel', align: 'left' }, ctx)}</div>` : ''}`;
       if (isEmail) {
         const imgTd = `<td class="scalo-col" width="${iw}%" valign="middle" style="${css({ width: `${iw}%`, padding: right ? '0 0 0 12px' : '0 12px 0 0' })}">${img}</td>`;
         const txtTd = `<td class="scalo-col" width="${100 - iw}%" valign="middle" style="${css({ width: `${100 - iw}%`, padding: right ? '0 12px 0 0' : '0 0 0 12px', textAlign: 'left' })}">${text}</td>`;
@@ -823,7 +922,7 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
       const v = num(b.value, 70, 0, 100);
       const h = num(b.height, 14, 4, 48);
       const bar = safeColor(b.barColor) ?? accent;
-      const track = safeColor(b.trackColor) ?? '#e2e8f0';
+      const track = safeColor(b.trackColor) ?? th?.border ?? '#e2e8f0';
       const label = b.label ? `<div style="${css({ display: 'flex', justifyContent: 'space-between', fontSize: 15, fontWeight: 600, marginBottom: 8 })}"><span${editAttr(ctx, 'label')}>${plain(b.label, ctx)}</span><span>${v}%</span></div>` : '';
       if (isEmail) {
         return wrap(`${b.label ? `<div style="${css({ fontSize: 15, fontWeight: 600, marginBottom: 8 })}">${plain(b.label, ctx)} — ${v}%</div>` : ''}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="${css({ background: track, borderRadius: h })}"><tr><td width="${v}%" height="${h}" bgcolor="${esc(bar)}" style="${css({ background: bar, height: h, borderRadius: h, fontSize: 1, lineHeight: `${h}px` })}">&nbsp;</td>${v < 100 ? `<td style="font-size:1px">&nbsp;</td>` : ''}</tr></table>`, { align: false });
@@ -835,7 +934,7 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
       const logoSrc = safeSrc(b.logoSrc, ctx);
       const logo = logoSrc
         ? `<img src="${esc(logoSrc)}" alt="${esc(b.logoText ?? 'Logo')}" width="${num(b.logoWidth, 140, 30, 400)}" style="${css({ width: num(b.logoWidth, 140, 30, 400), maxWidth: '100%', height: 'auto', display: 'block', border: 0 })}">`
-        : `<span${editAttr(ctx, 'logoText')} style="${css({ fontWeight: 800, fontSize: 22, letterSpacing: -0.3, fontFamily: settings.headingFont || 'inherit' })}">${plain(b.logoText || 'Logo', ctx)}</span>`;
+        : `<span${editAttr(ctx, 'logoText')} style="${css({ fontWeight: th?.headingWeight ?? 800, fontSize: 22, letterSpacing: th?.headingSpacing ?? -0.3, textTransform: th?.headingCase, fontFamily: settings.headingFont || 'inherit' })}">${plain(b.logoText || 'Logo', ctx)}</span>`;
       const links = arr<{ label: string; url: string }>(b.links).filter(Boolean);
       const linkA = (l: { label: string; url: string }) =>
         ctx.mode === 'editor' ? `<span style="${css({ fontWeight: 500, fontSize: 15, opacity: 0.85 })}">${plain(l.label, ctx)}</span>` : `<a href="${esc(safeUrl(l.url))}" style="${css({ fontWeight: 500, fontSize: 15, textDecoration: 'none', color: 'inherit', opacity: 0.85 })}">${plain(l.label, ctx)}</a>`;
@@ -843,8 +942,8 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
         const row = links.map(linkA).join('<span style="opacity:.35;padding:0 10px">|</span>');
         return wrap(`<div style="text-align:center">${logoSrc ? `<div style="display:inline-block">${logo}</div>` : logo}</div>${row ? `<div style="${css({ textAlign: 'center', paddingTop: 12, fontSize: 14 })}">${row}</div>` : ''}`, { align: false });
       }
-      const cta = b.ctaLabel ? buttonHtml({ label: plain(b.ctaLabel, ctx), href: safeUrl(b.ctaUrl), size: 'sm', radius: 8, edit: 'ctaLabel' }, ctx) : '';
-      const nav = `<div style="${css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24 })}"><div>${logo}</div><div style="${css({ display: 'flex', alignItems: 'center', gap: 28 })}"><nav class="scalo-nav-links" style="${css({ display: 'flex', gap: 28, alignItems: 'center' })}">${links.map(linkA).join('')}</nav>${cta}</div></div>`;
+      const cta = b.ctaLabel ? buttonHtml({ label: plain(b.ctaLabel, ctx), href: safeUrl(b.ctaUrl), size: 'sm', radius: th ? undefined : 8, edit: 'ctaLabel' }, ctx) : '';
+      const nav = `<div style="${css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24 })}"><div>${logo}</div><div style="${css({ display: 'flex', alignItems: 'center', gap: 28 })}"><nav class="scalo-nav-links" style="${css({ display: 'flex', gap: 28, alignItems: 'center' })}">${links.map(linkA).join('')}</nav>${th && cta ? `<span class="scalo-nav-links">${cta}</span>` : cta}</div></div>`;
       const out = wrap(nav, { align: false });
       return b.sticky && ctx.mode === 'page' ? out.replace('style="', 'style="position:sticky;top:0;z-index:50;') : out;
     }
@@ -874,8 +973,8 @@ export function renderBlock(b: Block, ctx: RenderContext): string {
       const v = num(b.value, 5, 0, max);
       const full = Math.round(v);
       const size = num(b.size, 26, 10, 80);
-      const color = safeColor(b.starColor) ?? '#f59e0b';
-      return wrap(`<div style="${css({ fontSize: size, lineHeight: 1, letterSpacing: 2 })}"><span style="color:${esc(color)}">${'★'.repeat(full)}</span><span style="color:#e2e8f0">${'★'.repeat(Math.max(0, max - full))}</span></div>${b.caption ? `<div${editAttr(ctx, 'caption')} style="${css({ fontSize: 15, marginTop: 8, opacity: 0.75 })}">${plain(b.caption, ctx)}</div>` : ''}`);
+      const color = safeColor(b.starColor) ?? th?.accent2 ?? '#f59e0b';
+      return wrap(`<div style="${css({ fontSize: size, lineHeight: 1, letterSpacing: 2 })}"><span style="color:${esc(color)}">${'★'.repeat(full)}</span><span style="color:${esc(th?.border ?? '#e2e8f0')}">${'★'.repeat(Math.max(0, max - full))}</span></div>${b.caption ? `<div${editAttr(ctx, 'caption')} style="${css({ fontSize: 15, marginTop: 8, opacity: 0.75 })}">${plain(b.caption, ctx)}</div>` : ''}`);
     }
     case 'quote': {
       const bar = safeColor(b.barColor) ?? accent;
@@ -956,7 +1055,9 @@ export function builderCss(target: 'page' | 'editor' | 'email'): string {
   const mobile = (hide: string) =>
     `.scalo-stack{flex-direction:column!important}.scalo-stack.scalo-rev{flex-direction:column-reverse!important}.scalo-stack>.scalo-col{flex:1 1 auto!important;width:100%!important}` +
     `.scalo-it{flex-direction:column!important;gap:24px!important}.scalo-it.scalo-it-r{flex-direction:column-reverse!important}.scalo-it>div{flex:1 1 auto!important;max-width:100%!important;width:100%!important}` +
-    `.scalo-nav-links{display:none!important}.scalo-mfs{font-size:var(--scalo-mfs)!important}${hide}`;
+    `.scalo-nav-links{display:none!important}.scalo-mfs{font-size:var(--scalo-mfs)!important}` +
+    `.scalo-mpy{padding-top:var(--scalo-mpt)!important;padding-bottom:var(--scalo-mpb)!important}` +
+    `.scalo-stack>.scalo-col[style*="--scalo-mcp"]{padding:var(--scalo-mcp)!important}${hide}`;
   if (target === 'page') {
     return `${common}.scalo-btn{transition:filter .15s ease,transform .15s ease}.scalo-btn:hover{filter:brightness(1.08);transform:translateY(-1px)}` +
       `.scalo-full{margin-left:calc(50% - 50vw)!important;margin-right:calc(50% - 50vw)!important}` +
@@ -972,7 +1073,11 @@ export function builderCss(target: 'page' | 'editor' | 'email'): string {
 export const GOOGLE_FONTS = [
   'Inter', 'Poppins', 'Montserrat', 'Roboto', 'Open Sans', 'Lato', 'Raleway', 'Nunito', 'DM Sans', 'Work Sans',
   'Outfit', 'Space Grotesk', 'Plus Jakarta Sans', 'Manrope', 'Playfair Display', 'Merriweather', 'Lora', 'Oswald', 'Bebas Neue', 'DM Serif Display',
+  // used by the kits (kits/)
+  'Fraunces', 'Newsreader', 'Cormorant Garamond', 'Sora', 'Bricolage Grotesque', 'Figtree',
 ];
+/** Serif families also loaded in italic (headings of the kits use *italic* words). */
+const ITALIC_FONTS = new Set(['Fraunces', 'Newsreader', 'Cormorant Garamond']);
 
 /** Google Fonts stylesheet URL for the fonts used by the settings (null when only system fonts are used). */
 export function googleFontsUrl(settings: Pick<PageSettings, 'fontFamily' | 'headingFont'>): string | null {
@@ -982,7 +1087,9 @@ export function googleFontsUrl(settings: Pick<PageSettings, 'fontFamily' | 'head
     if (first && GOOGLE_FONTS.includes(first)) fams.add(first);
   }
   if (!fams.size) return null;
-  const q = [...fams].map((f) => `family=${f.replace(/ /g, '+')}:wght@400;500;600;700;800`).join('&');
+  const q = [...fams]
+    .map((f) => `family=${f.replace(/ /g, '+')}:${ITALIC_FONTS.has(f) ? 'ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600' : 'wght@400;500;600;700;800'}`)
+    .join('&');
   return `https://fonts.googleapis.com/css2?${q}&display=swap`;
 }
 
@@ -1044,7 +1151,7 @@ export function renderEmailDocument(content: PageContent, opts: { subject: strin
 <body style="margin:0;padding:0;background:${esc(bg)}">${preheader}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${esc(bg)}" style="background:${esc(bg)}"><tr><td align="center" class="scalo-wrap" style="padding:24px 12px">
 <!--[if mso]><table role="presentation" width="${width}" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${esc(cbg)}" style="${css({ maxWidth: width, background: cbg, borderRadius: 8, fontFamily: settings.fontFamily, color: textColorOf(ctx) })}"><tr><td style="padding:${padY}px 0">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${esc(cbg)}" style="${css({ maxWidth: width, background: cbg, borderRadius: Math.min(themeOf(ctx)?.radius ?? 8, 16), fontFamily: settings.fontFamily, color: textColorOf(ctx) })}"><tr><td style="padding:${padY}px 0">
 ${renderBlocks(arr<Block>(content?.blocks), ctx)}
 </td></tr></table>
 <!--[if mso]></td></tr></table><![endif]-->

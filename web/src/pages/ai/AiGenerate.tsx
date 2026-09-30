@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { KeyRound, Sparkles } from 'lucide-react';
+import { KITS } from '@scalo/shared';
 import { Button, Field, Input, Select, Spinner, Textarea, cx, type ButtonProps } from '../../components/ui';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
@@ -77,6 +78,7 @@ function AiGenerateModal({ kind, onClose }: { kind: Kind; onClose: () => void })
   const [audience, setAudience] = useState('');
   const [tone, setTone] = useState<AiTone>('professionnel');
   const [language, setLanguage] = useState<AiLanguage>('fr');
+  const [kit, setKit] = useState('');
   const [goal, setGoal] = useState<AiGoal>('capture');
   const [emails, setEmails] = useState(5);
   const [link, setLink] = useState('');
@@ -89,7 +91,7 @@ function AiGenerateModal({ kind, onClose }: { kind: Kind; onClose: () => void })
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const brief = { offer, audience, tone, language };
+    const brief = { offer, audience, tone, language, ...(kit ? { kit } : {}) };
     const link_url = link.trim() || undefined;
     try {
       const started =
@@ -187,6 +189,16 @@ function AiGenerateModal({ kind, onClose }: { kind: Kind; onClose: () => void })
               </Select>
             </Field>
           </div>
+          <Field label="Identité visuelle" hint="Un kit applique ses polices, ses couleurs et le style de ses boutons aux contenus générés.">
+            <Select value={kit} onChange={(e) => setKit(e.target.value)}>
+              <option value="">Standard (sans kit)</option>
+              {KITS.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.name} — {k.universe}
+                </option>
+              ))}
+            </Select>
+          </Field>
           {kind !== 'funnel' && (
             <div className="grid gap-4 sm:grid-cols-2">
               {kind === 'campaign' && (

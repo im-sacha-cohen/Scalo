@@ -160,7 +160,7 @@ export const api = {
 
   // funnels
   funnels: () => request<Funnel[]>('GET', '/funnels'),
-  createFunnel: (b: { name: string; template: string }) => request<Funnel>('POST', '/funnels', b),
+  createFunnel: (b: { name: string; template: string; kit?: string; flow?: string }) => request<Funnel>('POST', '/funnels', b),
   funnel: (id: number) => request<Funnel>('GET', `/funnels/${id}`),
   updateFunnel: (id: number, b: { name?: string; slug?: string }) => request<Funnel>('PATCH', `/funnels/${id}`, b),
   deleteFunnel: (id: number) => request<Ok>('DELETE', `/funnels/${id}`),
@@ -174,7 +174,7 @@ export const api = {
 
   // broadcasts
   broadcasts: () => request<Broadcast[]>('GET', '/broadcasts'),
-  createBroadcast: (subject: string) => request<Broadcast>('POST', '/broadcasts', { subject }),
+  createBroadcast: (subject: string, content?: PageContent) => request<Broadcast>('POST', '/broadcasts', { subject, ...(content ? { content } : {}) }),
   broadcast: (id: number) => request<Broadcast>('GET', `/broadcasts/${id}`),
   updateBroadcast: (id: number, b: { subject?: string; content?: PageContent; tag_id?: number | null; segment_id?: number | null; ab_test?: AbTestConfig | null }) =>
     request<Broadcast>('PATCH', `/broadcasts/${id}`, b),
@@ -191,7 +191,7 @@ export const api = {
   campaign: (id: number) => request<Campaign>('GET', `/campaigns/${id}`),
   updateCampaign: (id: number, b: { name?: string; trigger_tag_id?: number | null; stop_tag_id?: number | null }) => request<Campaign>('PATCH', `/campaigns/${id}`, b),
   deleteCampaign: (id: number) => request<Ok>('DELETE', `/campaigns/${id}`),
-  createCampaignEmail: (campaignId: number, b: { subject: string; delay_days: number; condition?: CampaignCondition | null; apply_to_existing?: boolean }) =>
+  createCampaignEmail: (campaignId: number, b: { subject: string; delay_days: number; condition?: CampaignCondition | null; apply_to_existing?: boolean; content?: PageContent }) =>
     request<CampaignEmail & { backfilled: number }>('POST', `/campaigns/${campaignId}/emails`, b),
   updateCampaignEmail: (id: number, b: { subject?: string; content?: PageContent; delay_days?: number; condition?: CampaignCondition | null }) =>
     request<CampaignEmail>('PATCH', `/campaign-emails/${id}`, b),

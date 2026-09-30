@@ -86,12 +86,18 @@ export function createAiRouter(opts: AiOptions = {}) {
       deps,
       { kind: 'funnel', label: brief.offer, ...funnelPrompt(brief), schema: funnelOutputSchema, maxTokens: 32_000, effort: 'medium' },
       async (out) => {
-        const funnel = buildFunnel(out, brief.goal);
+        const funnel = buildFunnel(out, brief.goal, brief.kit);
         if (!funnel) throw new AiError('invalid_output');
         const funnelId = await withFreeSlug(db, async (trx) => {
           const f = await trx
             .insertInto('funnels')
-            .values({ user_id: userId, name: funnel.name, slug: await uniqueFunnelSlug(funnel.name, trx), created_at: nowIso() })
+            .values({
+              user_id: userId,
+              name: funnel.name,
+              slug: await uniqueFunnelSlug(funnel.name, trx),
+              created_at: nowIso(),
+              ...(brief.kit ? { settings: JSON.stringify({ kit: brief.kit }) } : {}),
+            })
             .returning('id')
             .executeTakeFirstOrThrow();
           for (const s of funnel.steps) await insertStep(trx, f.id, s);
@@ -115,7 +121,7 @@ export function createAiRouter(opts: AiOptions = {}) {
       async (out) => {
         const emails = out.emails
           .slice(0, brief.emails)
-          .map((e, i) => ({ email: buildEmail(e, brief.link_url), delay_days: clampDelay(e.delay_days, i === 0) }))
+          .map((e, i) => ({ email: buildEmail(e, brief.link_url, brief.kit), delay_days: clampDelay(e.delay_days, i === 0) }))
           .filter((e): e is { email: NonNullable<ReturnType<typeof buildEmail>>; delay_days: number } => !!e.email);
         if (!emails.length) throw new AiError('invalid_output');
         const campaignId = await db.transaction().execute(async (trx) => {
@@ -147,7 +153,7 @@ export function createAiRouter(opts: AiOptions = {}) {
       deps,
       { kind: 'newsletter', label: brief.offer, ...newsletterPrompt(brief), schema: newsletterOutputSchema, maxTokens: 16_000, effort: 'medium' },
       async (out) => {
-        const email = buildEmail(out, brief.link_url);
+        const email = buildEmail(out, brief.link_url, brief.kit);
         if (!email) throw new AiError('invalid_output');
         const b = await db
           .insertInto('broadcasts')

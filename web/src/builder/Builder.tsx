@@ -24,6 +24,10 @@ import {
   DEFAULT_EMAIL_SETTINGS,
   DEFAULT_SETTINGS,
   SECTION_TEMPLATES,
+  KIT_SECTIONS,
+  applyKitSettings,
+  kitSection,
+  parseKitSectionId,
   adaptForEmail,
   buildSection,
   cloneBlock,
@@ -540,6 +544,8 @@ export function Builder({ content, onChange, mode, title, barStart, barEnd, pane
     }
     if (item.kind === 'type') return [item.type === 'columns' ? createColumns([50, 50]) : createBlock(item.type)];
     if (item.kind === 'section') {
+      const k = parseKitSectionId(item.id);
+      if (k) return kitSection(k.kit, k.kind, mode);
       const t = SECTION_TEMPLATES.find((s) => s.id === item.id);
       return t ? [buildSection(t, mode, settings.accent)] : [];
     }
@@ -672,7 +678,7 @@ export function Builder({ content, onChange, mode, title, barStart, barEnd, pane
       : dragItem.kind === 'move'
         ? BLOCK_LABELS[findBlock(blocks, dragItem.id)?.block.type ?? 'text']
         : dragItem.kind === 'section'
-          ? SECTION_TEMPLATES.find((s) => s.id === dragItem.id)?.name ?? 'Section'
+          ? (parseKitSectionId(dragItem.id) ? KIT_SECTIONS[parseKitSectionId(dragItem.id)!.kind].name : SECTION_TEMPLATES.find((s) => s.id === dragItem.id)?.name) ?? 'Section'
           : loadSavedSections().find((s) => s.id === dragItem.id)?.name ?? 'Section'
     : '';
 
@@ -705,7 +711,7 @@ export function Builder({ content, onChange, mode, title, barStart, barEnd, pane
 
   let flyoutBody: ReactNode = null;
   if (activePanel === 'add') flyoutBody = <AddPanel mode={mode} />;
-  else if (activePanel === 'sections') flyoutBody = <SectionsPanel mode={mode} accent={settings.accent} />;
+  else if (activePanel === 'sections') flyoutBody = <SectionsPanel mode={mode} accent={settings.accent} kitId={settings.theme?.kit ?? null} />;
   else if (activePanel === 'layers') flyoutBody = <LayersPanel blocks={blocks} />;
   else if (activePanel === 'settings') flyoutBody = <SettingsPanel mode={mode} settings={settings} />;
   else if (activePanel) flyoutBody = panels.find((p) => p.id === activePanel)?.render() ?? null;
@@ -887,6 +893,14 @@ export function Builder({ content, onChange, mode, title, barStart, barEnd, pane
         open={templatesOpen}
         mode={mode}
         hasContent={blocks.length > 0}
+        currentKit={settings.theme?.kit ?? null}
+        onApplyKit={(kitId) => {
+          const next = applyKitSettings(settings, kitId, mode);
+          if (!next) return;
+          ops.updateSettings(next);
+          setTemplatesOpen(false);
+          toast.success('Kit appliqué — Ctrl+Z pour revenir en arrière');
+        }}
         onClose={() => setTemplatesOpen(false)}
         onPick={(c) => {
           ops.replaceContent(c);

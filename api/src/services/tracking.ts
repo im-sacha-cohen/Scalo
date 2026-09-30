@@ -6,6 +6,7 @@ import { z } from 'zod';
 import {
   COOKIE_BANNER_DEFAULTS,
   esc,
+  getKit,
   LEGAL_PAGES,
   TRACKING_ID_PATTERNS,
   type CookieBannerSettings,
@@ -23,6 +24,8 @@ const idField = (re: RegExp, message: string, upper: boolean) =>
     .optional();
 
 export const funnelSettingsInput = z.object({
+  /** Kit of the funnel; an unknown id (kit removed, newer export) is simply dropped by `clean`. */
+  kit: z.string().trim().max(40).optional(),
   tracking: z
     .object({
       meta_pixel_id: idField(TRACKING_ID_PATTERNS.meta_pixel_id, 'Identifiant Meta Pixel invalide : uniquement des chiffres (ex. 123456789012345)', false),
@@ -61,6 +64,7 @@ export function readFunnelSettings(raw: unknown): FunnelSettings {
 /** Drops empty values. */
 export function clean(s: FunnelSettingsInput): FunnelSettings {
   const out: FunnelSettings = {};
+  if (s.kit && getKit(s.kit)) out.kit = s.kit;
   if (s.tracking) {
     const t: FunnelTracking = {};
     if (s.tracking.meta_pixel_id) t.meta_pixel_id = s.tracking.meta_pixel_id;
