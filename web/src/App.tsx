@@ -55,15 +55,15 @@ function RequireAuth() {
 function GuestOnly() {
   const { user, loading } = useAuth();
   if (loading) return <FullScreenLoader />;
-  if (user) return <Navigate to="/" replace />;
+  if (user) return <Navigate to="/dashboard" replace />;
   return <Outlet />;
 }
 
 const router = createBrowserRouter([
   // dev only: a redirect URI that shows the code / error sent back by the authorization server
   ...(import.meta.env.DEV ? [{ path: '/oauth/test-callback', element: <TestCallbackPage /> }] : []),
-  // public marketing page, reachable even when signed in
-  { path: '/home', element: <LandingPage /> },
+  { path: '/', element: <LandingPage /> },
+  { path: '/home', element: <Navigate to="/" replace /> },
   // shared funnel: public read-only preview, "Importer dans mon compte" asks to sign in
   { path: '/share/:token', element: <SharePage /> },
   // Enterprise edition, when ee/ is installed (team invitation link)
@@ -87,7 +87,7 @@ const router = createBrowserRouter([
       {
         element: <Layout />,
         children: [
-          { index: true, element: <DashboardPage /> },
+          { path: '/dashboard', element: <DashboardPage /> },
           { path: '/contacts', element: <ContactsPage /> },
           { path: '/contacts/:id', element: <ContactDetailPage /> },
           { path: '/migrate', element: <MigratePage /> },

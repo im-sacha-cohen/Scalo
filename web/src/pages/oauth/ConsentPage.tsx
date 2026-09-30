@@ -89,7 +89,7 @@ export function ConsentPage() {
           <CircleAlert size={36} className="mx-auto text-rose-500" />
           <h1 className="mt-4 text-lg font-semibold text-slate-900">Autorisation impossible</h1>
           <p className="mt-2 text-sm text-slate-500">{error}</p>
-          <Button variant="secondary" className="mt-6" onClick={() => navigate('/')}>
+          <Button variant="secondary" className="mt-6" onClick={() => navigate('/dashboard')}>
             Aller au tableau de bord
           </Button>
         </div>

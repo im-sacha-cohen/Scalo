@@ -101,7 +101,7 @@ export function LoginPage() {
     setLoading(true);
     try {
       await login(email.trim(), password);
-      navigate(next ?? '/', { replace: true });
+      navigate(next ?? '/dashboard', { replace: true });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -168,7 +168,7 @@ export function RegisterPage() {
     setLoading(true);
     try {
       await register(name.trim(), email.trim(), password);
-      navigate(next ?? '/', { replace: true });
+      navigate(next ?? '/dashboard', { replace: true });
     } catch (err) {
       setError((err as Error).message);
     } finally {

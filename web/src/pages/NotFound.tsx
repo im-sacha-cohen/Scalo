@@ -9,7 +9,7 @@ export function NotFoundPage() {
       title="Page introuvable"
       description="Cette page n’existe pas ou a été déplacée."
       action={
-        <Link to="/">
+        <Link to="/dashboard">
           <Button>Retour au tableau de bord</Button>
         </Link>
       }

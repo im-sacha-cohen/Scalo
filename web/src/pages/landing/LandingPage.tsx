@@ -105,7 +105,7 @@ function Nav() {
         </nav>
         <div className="hidden items-center gap-3 md:flex">
           {user ? (
-            <PrimaryCta to="/" dark>
+            <PrimaryCta to="/dashboard" dark>
               Open app
             </PrimaryCta>
           ) : (
@@ -209,7 +209,7 @@ function Hero() {
             One login, one bill, zero duct tape.
           </p>
           <div className="landing-rise mt-9 flex flex-wrap items-center gap-4" style={{ animationDelay: '240ms' }}>
-            <PrimaryCta to={user ? '/' : '/register'} dark>
+            <PrimaryCta to={user ? '/dashboard' : '/register'} dark>
               {user ? 'Open your dashboard' : 'Start free'}
             </PrimaryCta>
             <a href="#how" className="inline-flex items-center gap-1.5 px-2 text-[15px] font-semibold text-white/90 hover:text-white">
@@ -607,7 +607,7 @@ function FinalCta() {
         </h2>
         <p className="mt-6 max-w-md text-lg text-brand-200">Set up your first funnel in minutes. Free, no credit card.</p>
         <div className="mt-9">
-          <PrimaryCta to={user ? '/' : '/register'} dark>
+          <PrimaryCta to={user ? '/dashboard' : '/register'} dark>
             {user ? 'Open your dashboard' : 'Start free'}
           </PrimaryCta>
         </div>

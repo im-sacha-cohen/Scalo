@@ -8,7 +8,7 @@ import { initials } from '../lib/format';
 import { Avatar, cx } from './ui';
 
 const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
-  { to: '/', label: 'Tableau de bord', icon: LayoutDashboard, end: true },
+  { to: '/dashboard', label: 'Tableau de bord', icon: LayoutDashboard, end: true },
   { to: '/funnels', label: 'Tunnels', icon: Funnel },
   { to: '/emails', label: 'Emails', icon: Mail },
   { to: '/courses', label: 'Formations', icon: GraduationCap },

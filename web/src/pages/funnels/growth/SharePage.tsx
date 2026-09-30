@@ -49,7 +49,7 @@ export function SharePage() {
     <div className="min-h-full bg-slate-50">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
-          <Link to={user ? '/' : '/home'} aria-label="Accueil">
+          <Link to={user ? '/dashboard' : '/'} aria-label="Accueil">
             <Logo />
           </Link>
           {user ? (
