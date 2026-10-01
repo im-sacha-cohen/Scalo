@@ -1,22 +1,16 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { Eye, Funnel as FunnelIcon, Layers, MousePointerClick, Plus, CircleCheck, FileText, Percent, Upload } from 'lucide-react';
-import { FUNNEL_TEMPLATES, KITS, KIT_FLOWS, type Funnel, type KitGoal } from '@scalo/shared';
+import { Eye, Funnel as FunnelIcon, Layers, MousePointerClick, Plus, Percent, Upload } from 'lucide-react';
+import { KITS, KIT_FLOWS, type Funnel, type KitGoal } from '@scalo/shared';
 import { Chips, KIT_GOAL_LABELS, KitCards, KitFlowStrip, KitSwatch, SearchBox, kitMatches } from '../../builder/kits';
 import { api } from '../../lib/api';
 import { useLoad } from '../../lib/hooks';
-import { fmtDate, fmtNumber, fmtPercent, ratio, STEP_TYPE_LABELS } from '../../lib/format';
+import { fmtDate, fmtNumber, fmtPercent, ratio } from '../../lib/format';
 import { Button, Card, cx, EmptyState, ErrorState, Field, Input, PageHeader, Skeleton } from '../../components/ui';
 import { Modal } from '../../components/Modal';
 import { ImportFunnelModal } from './growth/ImportFunnelModal';
 import { useToast } from '../../components/Toast';
 import { AiGenerateButton } from '../ai/AiGenerate';
-
-const TEMPLATE_ACCENTS: Record<string, string> = {
-  optin: 'from-brand-500 to-violet-500',
-  sales: 'from-emerald-500 to-teal-500',
-  blank: 'from-slate-400 to-slate-500',
-};
 
 export function FunnelsPage() {
   const [params, setParams] = useSearchParams();
@@ -138,9 +132,6 @@ function CreateFunnelModal({ open, onClose }: { open: boolean; onClose: () => vo
   const navigate = useNavigate();
   const toast = useToast();
   const [name, setName] = useState('');
-  // 'kits': a visual identity + a funnel type, every step in the same kit; 'classic': the historical templates
-  const [source, setSource] = useState<'kits' | 'classic'>('kits');
-  const [template, setTemplate] = useState<string>('optin');
   const [kitId, setKitId] = useState<string>(KITS[0]!.id);
   const [flow, setFlow] = useState<KitGoal>('capture');
   const [goal, setGoal] = useState<KitGoal | 'all'>('all');
@@ -150,8 +141,6 @@ function CreateFunnelModal({ open, onClose }: { open: boolean; onClose: () => vo
   useEffect(() => {
     if (open) {
       setName('');
-      setSource('kits');
-      setTemplate('optin');
       setKitId(KITS[0]!.id);
       setFlow('capture');
       setGoal('all');
@@ -171,7 +160,7 @@ function CreateFunnelModal({ open, onClose }: { open: boolean; onClose: () => vo
     e.preventDefault();
     setSaving(true);
     try {
-      const f = await api.createFunnel(source === 'kits' ? { name: name.trim(), template: 'blank', kit: kit.id, flow } : { name: name.trim(), template });
+      const f = await api.createFunnel({ name: name.trim(), template: 'blank', kit: kit.id, flow });
       toast.success('Tunnel créé');
       onClose();
       navigate(`/funnels/${f.id}`);
@@ -207,19 +196,9 @@ function CreateFunnelModal({ open, onClose }: { open: boolean; onClose: () => vo
               <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="ex. Guide gratuit marketing" />
             </Field>
           </div>
-          <Chips
-            label="Point de départ"
-            value={source}
-            onChange={setSource}
-            options={[
-              ['kits', 'Kits'],
-              ['classic', 'Modèles classiques'],
-            ]}
-          />
         </div>
 
-        {source === 'kits' ? (
-          <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
             <div>
               <div className="mb-3 flex flex-wrap items-center gap-3">
                 <Chips
@@ -270,48 +249,6 @@ function CreateFunnelModal({ open, onClose }: { open: boolean; onClose: () => vo
               <KitFlowStrip kitId={kit.id} goal={flow} width={148} />
             </aside>
           </div>
-        ) : (
-          <div>
-            <p className="mb-2 text-sm font-medium text-slate-700">Modèle</p>
-            <div className="grid gap-3 sm:grid-cols-3">
-              {Object.entries(FUNNEL_TEMPLATES).map(([key, t]) => {
-                const active = template === key;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setTemplate(key)}
-                    className={cx(
-                      'relative flex flex-col rounded-xl border-2 p-3 text-left transition-all',
-                      active ? 'border-brand-500 bg-brand-50/50 ring-4 ring-brand-500/10' : 'border-slate-200 hover:border-slate-300',
-                    )}
-                  >
-                    {active && <CircleCheck size={18} className="absolute top-2.5 right-2.5 text-brand-600" />}
-                    <div className={cx('mb-3 flex h-16 items-end gap-1 rounded-lg bg-gradient-to-br p-2', TEMPLATE_ACCENTS[key] ?? TEMPLATE_ACCENTS.blank)}>
-                      {t.steps.map((_, i) => (
-                        <span key={i} className="flex h-full flex-1 flex-col gap-1 rounded bg-white/90 p-1">
-                          <span className="h-1 w-3/4 rounded bg-slate-300" />
-                          <span className="h-1 w-1/2 rounded bg-slate-200" />
-                          <span className="mt-auto h-1.5 w-full rounded bg-slate-400/60" />
-                        </span>
-                      ))}
-                    </div>
-                    <span className="text-sm font-semibold text-slate-900">{t.label}</span>
-                    <span className="mt-0.5 text-xs text-slate-500">{t.description}</span>
-                    <span className="mt-2 flex flex-wrap gap-1">
-                      {t.steps.map((s, i) => (
-                        <span key={i} className="inline-flex items-center gap-1 rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 ring-1 ring-slate-200">
-                          <FileText size={10} /> {s.name}
-                          <span className="text-slate-400">· {STEP_TYPE_LABELS[s.type]}</span>
-                        </span>
-                      ))}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </form>
     </Modal>
   );

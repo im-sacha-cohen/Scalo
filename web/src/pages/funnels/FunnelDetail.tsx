@@ -609,7 +609,7 @@ const TEMPLATE_BUILDERS: Record<string, () => PageContent> = {};
 
 function StepTemplatePicker({ value, funnelKit, onChange }: { value: string; funnelKit: string | null; onChange: (id: string, type?: StepType) => void }) {
   const previews = usePageTemplatePreviews();
-  // the kit of the funnel comes first; another kit can be picked, the classic templates stay available below
+  // the kit of the funnel comes first; another kit can be picked
   const [kitId, setKitId] = useState<string>(funnelKit && getKit(funnelKit) ? funnelKit : KITS[0]!.id);
   const kit = getKit(kitId) ?? KITS[0]!;
   for (const p of previews) TEMPLATE_BUILDERS[p.t.id] = () => p.t.build();
@@ -649,16 +649,11 @@ function StepTemplatePicker({ value, funnelKit, onChange }: { value: string; fun
           </Opt>
         ))}
       </div>
-      <p className="mb-2 text-sm font-medium text-slate-700">Modèles classiques</p>
+      <p className="mb-2 text-sm font-medium text-slate-700">Autres</p>
       <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
-        <Opt id="default" label={funnelKit ? 'Selon le type, dans le kit' : 'Modèle du type (par défaut)'}>
+        <Opt id="default" label={funnelKit ? 'Selon le type, dans le kit' : 'Selon le type'}>
           <div className="flex h-[114px] items-center justify-center bg-brand-50 text-xs font-medium text-brand-700">Selon le type</div>
         </Opt>
-        {previews.map((p) => (
-          <Opt key={p.t.id} id={p.t.id} label={p.t.name} type={p.t.stepType}>
-            <DocThumb html={p.html} width={190} ratio={0.6} />
-          </Opt>
-        ))}
         <Opt id="blank" label="Page vierge">
           <div className="flex h-[114px] items-center justify-center bg-slate-50 text-xs text-slate-400">Vide</div>
         </Opt>

@@ -58,10 +58,10 @@ export function Modal({
         ref={panel}
         role="dialog"
         aria-modal="true"
-        className={cx('relative w-full animate-pop-in rounded-2xl bg-white shadow-pop', widths[size])}
+        className={cx('relative flex max-h-[calc(100dvh-2rem)] w-full animate-pop-in flex-col rounded-2xl bg-white shadow-pop sm:max-h-[calc(100dvh-3rem)]', widths[size])}
       >
         {(title || description) && (
-          <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 pt-5 pb-4">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-6 pt-5 pb-4">
             <div className="min-w-0">
               {title && <h2 className="text-lg font-semibold text-slate-900">{title}</h2>}
               {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
@@ -71,8 +71,8 @@ export function Modal({
             </button>
           </div>
         )}
-        <div className={cx('px-6 py-5', bodyClassName)}>{children}</div>
-        {footer && <div className="flex flex-wrap items-center justify-end gap-2 rounded-b-2xl border-t border-slate-100 bg-slate-50/70 px-6 py-3.5">{footer}</div>}
+        <div className={cx('min-h-0 flex-1 overflow-y-auto px-6 py-5', bodyClassName)}>{children}</div>
+        {footer && <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 rounded-b-2xl border-t border-slate-100 bg-slate-50/70 px-6 py-3.5">{footer}</div>}
       </div>
     </div>,
     document.body,

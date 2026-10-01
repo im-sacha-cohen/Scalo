@@ -3,7 +3,6 @@ import { Check, FileText, Palette, TriangleAlert } from 'lucide-react';
 import {
   DEFAULT_EMAIL_SETTINGS,
   DEFAULT_SETTINGS,
-  EMAIL_TEMPLATES,
   KITS,
   KIT_EMAILS,
   KIT_EMAIL_KINDS,
@@ -14,7 +13,6 @@ import {
   kitEmail,
   kitPage,
   kitSettings,
-  renderEmailDocument,
   renderPageDocument,
   type PageContent,
 } from '@scalo/shared';
@@ -93,24 +91,11 @@ export function TemplateGallery({
   );
 }
 
-const CLASSIC = 'classic';
-
 function GalleryBody({ mode, hasContent, currentKit, onPick, onApplyKit }: { mode: BuilderMode; hasContent: boolean; currentKit: string | null; onPick: (c: PageContent) => void; onApplyKit?: (kitId: string) => void }) {
   const [group, setGroup] = useState<string>(currentKit && getKit(currentKit) ? currentKit : KITS[0]!.id);
   const [cat, setCat] = useState<string>('Tous');
   const [query, setQuery] = useState('');
   const [pending, setPending] = useState<{ name: string; content: PageContent } | null>(null);
-  const classicPages = usePageTemplatePreviews();
-  const classicEmails = useMemo(
-    () =>
-      mode === 'email'
-        ? EMAIL_TEMPLATES.map((t) => {
-            const content = t.build();
-            return { t, content, html: renderEmailDocument(content, { subject: t.name, vars: EXAMPLE_VARS }) };
-          })
-        : [],
-    [mode],
-  );
 
   const choose = (name: string, content: PageContent) => {
     if (hasContent) setPending({ name, content });
@@ -119,9 +104,8 @@ function GalleryBody({ mode, hasContent, currentKit, onPick, onApplyKit }: { mod
 
   const kit = getKit(group);
   const searching = query.trim() !== '';
-  // a search looks in every kit and in the classic templates; otherwise only the selected group is shown
+  // a search looks in every kit; otherwise only the selected kit is shown
   const kitsShown = searching ? KITS : kit ? [kit] : [];
-  const showClassic = searching || group === CLASSIC;
   const cats = ['Tous', ...new Set([...KIT_PAGE_KINDS.map((k) => KIT_PAGES[k].category), ...PAGE_TEMPLATES.map((t) => t.category)])];
   const catOk = (c: string) => cat === 'Tous' || c === cat;
 
@@ -160,19 +144,6 @@ function GalleryBody({ mode, hasContent, currentKit, onPick, onApplyKit }: { mod
       }
     }
   }
-  if (showClassic) {
-    if (mode === 'page') {
-      for (const p of classicPages) {
-        if (!catOk(p.t.category) || !textMatches(`${p.t.name} ${p.t.description} ${p.t.category} classique`, query)) continue;
-        cards.push(<Card key={p.t.id} data={p.t.id} name={p.t.name} description={p.t.description} badge={p.t.category} onClick={() => choose(p.t.name, p.t.build())} thumb={<DocThumb html={p.html} />} />);
-      }
-    } else {
-      for (const p of classicEmails) {
-        if (!textMatches(`${p.t.name} ${p.t.description} classique`, query)) continue;
-        cards.push(<Card key={p.t.id} data={p.t.id} name={p.t.name} description={p.t.description} onClick={() => choose(p.t.name, p.t.build())} thumb={<DocThumb html={p.html} docWidth={680} ratio={0.9} />} />);
-      }
-    }
-  }
   const blank = (): PageContent => (kit ? { settings: kitSettings(kit, mode), blocks: [] } : mode === 'email' ? BLANK_EMAIL : BLANK_PAGE);
 
   return (
@@ -189,12 +160,6 @@ function GalleryBody({ mode, hasContent, currentKit, onPick, onApplyKit }: { mod
               </GroupButton>
             </li>
           ))}
-          <li className="md:mt-2 md:border-t md:border-slate-100 md:pt-2">
-            <GroupButton active={!searching && group === CLASSIC} onClick={() => { setGroup(CLASSIC); setQuery(''); }} data={CLASSIC}>
-              <span className="h-3 w-3 shrink-0 rounded-full bg-slate-300" />
-              <span className="flex-1 truncate">Modèles classiques</span>
-            </GroupButton>
-          </li>
         </ul>
       </nav>
 
