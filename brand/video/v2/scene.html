@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Scalo — film v2 · one customer's journey</title>
+<style>
+@font-face { font-family: Inter; font-weight: 500; src: url(../fonts/fontsource-inter/files/inter-latin-500-normal.woff2); }
+@font-face { font-family: Inter; font-weight: 600; src: url(../fonts/fontsource-inter/files/inter-latin-600-normal.woff2); }
+@font-face { font-family: Inter; font-weight: 700; src: url(../fonts/fontsource-inter/files/inter-latin-700-normal.woff2); }
+@font-face { font-family: Jakarta; font-weight: 800; src: url(../fonts/fontsource-plus-jakarta-sans/files/plus-jakarta-sans-latin-800-normal.woff2); }
+@font-face { font-family: Mono; font-weight: 500; src: url(../fonts/fontsource-jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2); }
+:root {
+  --i50:#F6F5FF; --i100:#ECEAFF; --i200:#D6D1FF; --i300:#B3A9FF; --i400:#8A7CFF; --i500:#5B4BFF; --i600:#4A38E8;
+  --i700:#3A2BC0; --ink:#0E0B2B; --lime:#C6F432; --n200:#E4E3EC; --n500:#8B89A0; --n800:#3B3950; --ok:#12B76A;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--i50); }
+body { font-family: Inter, sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; }
+#stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: var(--i50); }
+#world { position: absolute; left: 0; top: 0; width: 7400px; height: 1080px; transform-origin: 0 0; }
+.abs { position: absolute; left: 0; top: 0; }
+.big { font-family: Jakarta, sans-serif; font-weight: 800; letter-spacing: -0.04em; line-height: 1; white-space: nowrap; }
+.mono { font-family: Mono, monospace; }
+.dots { position: absolute; left: -2000px; top: -2000px; width: 11400px; height: 5000px; background-image: radial-gradient(circle, rgba(14,11,43,.07) 2px, transparent 2.5px); background-size: 48px 48px; }
+svg.ic { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.card { position: absolute; background: #fff; border-radius: 28px; border: 2px solid var(--n200); box-shadow: 0 36px 70px -34px rgba(14,11,43,.28); }
+.chip { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; font-weight: 600; white-space: nowrap; }
+.bar { height: 12px; border-radius: 6px; background: var(--n200); }
+.lbl { position: absolute; width: 900px; text-align: center; top: -10px; font-size: 128px; }
+#hud { position: absolute; left: 80px; top: 64px; height: 60px; padding: 0 26px; background: var(--ink); color: #fff; font-size: 26px; }
+#stats { position: absolute; left: 0; right: 0; top: 96px; display: flex; justify-content: center; gap: 90px; }
+#stats div { text-align: center; }
+#stats .n { font-size: 96px; }
+#stats .k { margin-top: 10px; font-weight: 600; font-size: 26px; color: var(--n500); }
+#cap { position: absolute; left: 0; right: 0; bottom: 56px; text-align: center; }
+#cap span { display: inline-block; background: #fff; border: 2px solid var(--n200); box-shadow: 0 20px 40px -22px rgba(14,11,43,.3); font-weight: 600; font-size: 38px; letter-spacing: -0.01em; padding: 16px 34px 18px; border-radius: 22px; }
+#end { position: absolute; inset: 0; background: var(--i50); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="world">
+    <div class="dots"></div>
+    <svg class="abs" id="pathBase" width="7400" height="1080"></svg>
+    <div class="abs" id="pathClip" style="height:1080px;overflow:hidden"><svg class="abs" id="pathDone" width="7400" height="1080"></svg></div>
+    <div id="nodes"></div>
+
+    <!-- 1 · the post with the link -->
+    <div class="card" id="c1" style="left:700px;top:150px;width:600px;height:470px;padding:36px">
+      <div style="display:flex;align-items:center;gap:16px"><i style="width:64px;height:64px;border-radius:32px;background:var(--i200)"></i><div><div class="bar" style="width:180px;background:var(--n800)"></div><div class="bar" style="width:110px;margin-top:10px"></div></div></div>
+      <div style="margin-top:26px;font-weight:600;font-size:28px">My free launch guide is live.</div>
+      <div class="bar" style="width:86%;margin-top:18px"></div><div class="bar" style="width:62%;margin-top:12px"></div>
+      <div id="c1link" style="margin-top:30px;height:150px;border-radius:20px;background:var(--i50);border:3px solid var(--i100);padding:24px 26px">
+        <div class="big" style="font-size:34px;letter-spacing:-0.03em">The 7-day launch kit</div>
+        <div class="mono" style="margin-top:16px;font-size:22px;color:var(--i600)">yourbrand.com/free-guide</div>
+      </div>
+      <i class="abs" id="c1rip" style="left:0;top:0;width:120px;height:120px;border-radius:60px;border:4px solid var(--i500)"></i>
+    </div>
+    <svg class="abs" id="cur" viewBox="0 0 24 24" style="width:48px;height:48px;z-index:5"><path d="M4 2l16 9.5-7 1.5 4 7.5-3 1.5-4-7.5L4 19z" fill="#0E0B2B" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>
+
+    <!-- 2 · the landing page -->
+    <div class="card" id="c2" style="left:1980px;top:120px;width:640px;height:520px;overflow:hidden">
+      <div style="height:66px;border-bottom:2px solid var(--n200);display:flex;align-items:center;padding:0 22px;gap:8px">
+        <i style="width:12px;height:12px;border-radius:6px;background:var(--n200)"></i><i style="width:12px;height:12px;border-radius:6px;background:var(--n200)"></i><i style="width:12px;height:12px;border-radius:6px;background:var(--n200)"></i>
+        <div style="margin-left:16px;flex:1;height:40px;border-radius:20px;background:var(--i50);display:flex;align-items:center;gap:10px;padding:0 16px;font-size:19px;color:var(--n800)"><svg class="ic" viewBox="0 0 24 24" style="color:var(--ok)"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span class="mono" id="c2url"></span></div>
+      </div>
+      <div id="c2hero" style="margin:22px 26px 0;padding:30px 32px;border-radius:18px;background:var(--ink);transform-origin:50% 0"><div class="big" style="font-size:40px;color:#fff">The 7-day launch kit</div><div class="bar" style="margin-top:16px;width:70%;background:rgba(255,255,255,.25)"></div></div>
+      <div id="c2img" style="margin:18px 26px 0;height:120px;border-radius:18px;background:var(--i100);display:grid;place-items:center;color:var(--i400);font-size:54px;transform-origin:50% 0"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg></div>
+      <div id="c2form" style="margin:18px 26px 0;display:flex;gap:12px;transform-origin:50% 0">
+        <div id="c2in" style="flex:1;height:64px;border-radius:16px;border:3px solid var(--n200);display:flex;align-items:center;padding:0 18px;font-size:22px"><span class="mono" id="c2mail"></span><i id="c2caret" style="width:3px;height:30px;background:var(--i500);margin-left:2px"></i></div>
+        <div id="c2btn" style="height:64px;min-width:150px;border-radius:32px;background:var(--i500);color:#fff;font-weight:700;font-size:22px;display:flex;align-items:center;justify-content:center;padding:0 26px">Get it</div>
+      </div>
+    </div>
+
+    <!-- 3 · the email sequence -->
+    <div id="c3"></div>
+
+    <!-- 4 · booking a call -->
+    <div class="card" id="c4" style="left:4700px;top:150px;width:600px;height:470px;padding:36px">
+      <div class="chip" style="font-size:22px;color:var(--i600)"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>Book a call</div>
+      <div class="big" style="font-size:40px;margin-top:14px">Pick a time</div>
+      <div id="c4days" style="margin-top:26px;display:flex;gap:12px"></div>
+      <div id="c4slots" style="margin-top:20px;display:flex;gap:12px"></div>
+      <div id="c4ok" class="chip" style="margin-top:28px;height:64px;padding:0 24px;background:#DCFAE6;color:#067647;font-size:24px;transform-origin:0 50%"><svg class="ic" viewBox="0 0 24 24" style="stroke-width:3"><path d="M20 6 9 17l-5-5"/></svg>Confirmed · Thu 10:30</div>
+    </div>
+
+    <!-- 5 · the sale -->
+    <div class="card" id="c5" style="left:6000px;top:150px;width:600px;height:470px;padding:36px">
+      <div class="chip" style="font-size:22px;color:var(--i600)"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>Checkout</div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:18px"><div class="big" style="font-size:40px">Pro program</div><div class="big" style="font-size:64px;color:var(--i500)">$297</div></div>
+      <div style="margin-top:26px;height:64px;border-radius:16px;border:3px solid var(--n200);display:flex;align-items:center;padding:0 18px;font-size:22px" class="mono">•••• •••• •••• 4242</div>
+      <div id="c5btn" style="margin-top:16px;height:72px;border-radius:36px;background:var(--ink);color:#fff;font-weight:700;font-size:26px;display:flex;align-items:center;justify-content:center;gap:12px">Pay $297</div>
+      <div style="margin-top:22px;display:flex;gap:10px"><div class="bar" style="width:40%"></div><div class="bar" style="width:24%"></div></div>
+      <i class="abs" id="c5ring" style="left:180px;top:250px;width:240px;height:240px;border-radius:120px;border:6px solid var(--ok)"></i>
+    </div>
+
+    <div id="labels"></div>
+    <div id="crowd"></div>
+
+    <!-- Ana -->
+    <div class="abs" id="ana" style="width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:28px;background:var(--i500);border:6px solid #fff;box-shadow:0 10px 24px -6px rgba(91,75,255,.7)"></div>
+    <div class="abs" id="anaL" style="transform-origin:0 100%"><div class="chip" style="height:60px;padding:0 20px 0 8px;background:#fff;border:2px solid var(--n200);box-shadow:0 16px 30px -16px rgba(14,11,43,.35);font-size:24px;font-weight:700"><i style="width:44px;height:44px;border-radius:22px;background:var(--i500);color:#fff;display:grid;place-items:center;font-size:17px;font-style:normal">AL</i>Ana<span id="anaTags" style="display:inline-flex;gap:8px"></span></div></div>
+  </div>
+
+  <div id="hud" class="chip mono"></div>
+  <div id="stats"></div>
+  <div id="end">
+    <svg class="abs" id="logo" viewBox="0 0 284 80" style="left:460px;top:300px;width:1000px;height:282px;overflow:visible">
+      <rect x="8" y="8" width="64" height="64" rx="16" fill="#5B4BFF"/>
+      <rect class="lp" x="20" y="46.5" width="24" height="13" rx="6.5" fill="#BDB7FF"/>
+      <rect class="lp" x="28" y="33.5" width="24" height="13" rx="6.5" fill="#fff"/>
+      <rect class="lp" x="36" y="20.5" width="24" height="13" rx="6.5" fill="#C6F432"/>
+      <path id="wm" fill="#0E0B2B"/>
+    </svg>
+    <div class="abs big" id="etag" style="left:0;width:1920px;text-align:center;top:640px;font-size:60px;letter-spacing:-0.03em">Funnels, emails and contacts, in one place.</div>
+    <div class="abs" id="ecta" style="left:0;width:1920px;top:790px;display:flex;justify-content:center"><div class="chip" style="font-size:40px;padding:26px 50px;background:var(--ink);color:#fff;font-weight:700;gap:14px">Start free<svg class="ic" viewBox="0 0 24 24" style="stroke-width:2.8;color:var(--lime)"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div></div>
+  </div>
+  <div id="cap"></div>
+</div>
+
+<script>
+// ------------------------------------------------------------------ timeline (seconds) — voice lines are placed by mix.py at the same times
+const DURATION = 37;
+// [voice start, spoken duration, text]
+const LINES = [
+  [1.2, 1.0, 'This is Ana.'],
+  [3.0, 1.75, 'Tuesday morning, she clicks a link.'],
+  [5.6, 1.55, 'And lands on your page.'],
+  [7.6, 2.5, 'Built in minutes, on your own domain.'],
+  [10.9, 1.3, 'She leaves her email.'],
+  [12.7, 1.0, 'Scalo tags her.'],
+  [14.7, 3.3, 'Then the right emails go out, on their own.'],
+  [18.9, 1.4, 'Day five.'],
+  [20.5, 1.5, 'Ana books a call.'],
+  [22.9, 0.55, 'Day nine.'],
+  [23.9, 0.9, 'She buys.'],
+  [25.8, 1.45, 'You didn’t lift a finger.'],
+  [28.2, 2.4, 'Now picture a thousand more, just like her.'],
+];
+const CAPTIONS = !location.search.includes('captions=0');
+const X = [1000, 2300, 3700, 5000, 6300];            // stations along the journey
+const DONE = [4.35, 12.2, 16.9, 21.5, 24.5];         // when each station is completed
+const OVERVIEW = 25.4, CROWD = 28.2, END = 31.3;
+
+// ------------------------------------------------------------------ helpers
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, k) => a + (b - a) * k;
+const prog = (t, a, d) => clamp((t - a) / d);
+const eOut = (k) => 1 - Math.pow(1 - k, 3);
+const eInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+const eBack = (k, c1 = 1.7) => { const c3 = c1 + 1; return 1 + c3 * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2); };
+/** keyframes [[t, v], …] with ease-in-out between them */
+function kf(t, keys) {
+  if (t <= keys[0][0]) return keys[0][1];
+  for (let i = 1; i < keys.length; i++) if (t < keys[i][0]) return lerp(keys[i - 1][1], keys[i][1], eInOut(prog(t, keys[i - 1][0], keys[i][0] - keys[i - 1][0])));
+  return keys[keys.length - 1][1];
+}
+/** soft pop: scale + fade, used for everything that appears */
+function pop(e, t, a, { d = 0.45, from = 0.86, dy = 18 } = {}) {
+  const k = prog(t, a, d), s = lerp(from, 1, eBack(k));
+  e.style.opacity = clamp(k * 2.5); e.style.transform = `translateY(${(1 - eOut(k)) * dy}px) scale(${s})`;
+}
+const typed = (s, k) => s.slice(0, Math.round(clamp(k) * s.length));
+const fmt = (n) => Math.round(n).toLocaleString('en-US');
+function rnd(seed) { let s = seed; return () => ((s = (s * 16807) % 2147483647) / 2147483647); }
+function el(parent, css, html = '', cls = 'abs') { const e = document.createElement('div'); e.className = cls; e.style.cssText = css; e.innerHTML = html; $(parent).appendChild(e); return e; }
+const pathY = (x) => 760 + 36 * Math.sin(x / 520);
+const CHECK = '<svg class="ic" viewBox="0 0 24 24" style="stroke-width:3"><path d="M20 6 9 17l-5-5"/></svg>';
+const MAIL = '<svg class="ic" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>';
+
+// ------------------------------------------------------------------ build
+const WM = 'M108.95 61.52Q102.16 61.52 97.14 58.31Q92.11 55.10 90.30 49.67L98.61 45.74Q100.19 49.06 102.91 50.95Q105.63 52.84 108.95 52.84Q111.37 52.84 112.66 51.86Q113.94 50.87 113.94 49.14Q113.94 48.23 113.49 47.59Q113.03 46.95 112.13 46.42Q111.22 45.89 109.86 45.51L102.84 43.55Q97.78 42.11 95.06 38.90Q92.34 35.70 92.34 31.32Q92.34 27.46 94.30 24.59Q96.27 21.72 99.82 20.10Q103.37 18.48 107.97 18.48Q114.01 18.48 118.58 21.31Q123.15 24.14 125.04 29.28L116.66 33.20Q115.75 30.64 113.37 29.09Q110.99 27.54 107.97 27.54Q105.78 27.54 104.54 28.45Q103.29 29.35 103.29 30.94Q103.29 31.77 103.74 32.45Q104.20 33.13 105.22 33.66Q106.24 34.18 107.75 34.64L114.32 36.60Q119.45 38.11 122.17 41.17Q124.89 44.23 124.89 48.68Q124.89 52.54 122.89 55.41Q120.89 58.28 117.34 59.90Q113.79 61.52 108.95 61.52M149.28 61.52Q143.09 61.52 138.14 58.69Q133.20 55.86 130.29 50.95Q127.38 46.04 127.38 39.92Q127.38 33.81 130.25 28.94Q133.12 24.07 138.11 21.27Q143.09 18.48 149.28 18.48Q153.89 18.48 157.82 20.06Q161.74 21.65 164.54 24.48Q167.33 27.31 168.54 31.16L158.72 35.39Q157.67 32.30 155.14 30.48Q152.61 28.67 149.28 28.67Q146.34 28.67 144.03 30.11Q141.73 31.54 140.41 34.11Q139.09 36.68 139.09 40.00Q139.09 43.32 140.41 45.89Q141.73 48.46 144.03 49.89Q146.34 51.33 149.28 51.33Q152.68 51.33 155.17 49.52Q157.67 47.70 158.72 44.61L168.54 48.91Q167.41 52.54 164.61 55.41Q161.82 58.28 157.89 59.90Q153.96 61.52 149.28 61.52M185.31 61.52Q180.85 61.52 177.60 60.09Q174.36 58.65 172.62 55.97Q170.88 53.29 170.88 49.59Q170.88 46.12 172.47 43.44Q174.05 40.76 177.34 38.94Q180.62 37.13 185.53 36.38L198.14 34.34L198.14 42.64L187.57 44.53Q185.15 44.98 183.87 46.08Q182.59 47.17 182.59 49.21Q182.59 51.10 184.02 52.16Q185.46 53.22 187.57 53.22Q190.37 53.22 192.48 52.01Q194.59 50.80 195.77 48.72Q196.94 46.65 196.94 44.15L196.94 33.43Q196.94 31.09 195.09 29.50Q193.24 27.92 190.06 27.92Q187.04 27.92 184.74 29.58Q182.44 31.24 181.38 33.96L172.32 29.65Q173.52 26.18 176.17 23.69Q178.81 21.20 182.51 19.84Q186.21 18.48 190.59 18.48Q195.80 18.48 199.81 20.36Q203.81 22.25 206.04 25.61Q208.26 28.97 208.26 33.43L208.26 60.62L197.69 60.62L197.69 53.97L200.26 53.52Q198.45 56.24 196.26 58.01Q194.07 59.79 191.35 60.65Q188.63 61.52 185.31 61.52M225.26 60.62L213.93 60.62L213.93 3.45L225.26 3.45L225.26 60.62M251.39 61.52Q245.27 61.52 240.25 58.73Q235.22 55.93 232.24 51.06Q229.26 46.19 229.26 40.00Q229.26 33.73 232.24 28.90Q235.22 24.07 240.25 21.27Q245.27 18.48 251.39 18.48Q257.50 18.48 262.49 21.27Q267.47 24.07 270.45 28.90Q273.44 33.73 273.44 40.00Q273.44 46.19 270.45 51.06Q267.47 55.93 262.49 58.73Q257.50 61.52 251.39 61.52M251.39 51.33Q254.48 51.33 256.79 49.89Q259.09 48.46 260.41 45.89Q261.73 43.32 261.73 40.00Q261.73 36.68 260.41 34.15Q259.09 31.62 256.79 30.14Q254.48 28.67 251.39 28.67Q248.29 28.67 245.95 30.14Q243.61 31.62 242.29 34.15Q240.96 36.68 240.96 40.00Q240.96 43.32 242.29 45.89Q243.61 48.46 245.95 49.89Q248.29 51.33 251.39 51.33';
+$('wm').setAttribute('d', WM);
+// the journey line
+const pts = []; for (let x = 200; x <= 6900; x += 20) pts.push(`${x},${pathY(x).toFixed(1)}`);
+$('pathBase').innerHTML = `<polyline points="${pts.join(' ')}" fill="none" stroke="#D6D1FF" stroke-width="8" stroke-linecap="round" stroke-dasharray="2 22"/>`;
+$('pathDone').innerHTML = `<polyline points="${pts.join(' ')}" fill="none" stroke="#5B4BFF" stroke-width="8" stroke-linecap="round"/>`;
+const nodes = X.map((x) => ({
+  stem: el('nodes', `left:${x - 2}px;top:640px;width:4px;height:${pathY(x) - 640}px;background:var(--n200)`),
+  ring: el('nodes', `left:${x - 24}px;top:${pathY(x) - 24}px;width:48px;height:48px;border-radius:24px;background:#fff;border:6px solid var(--i300);display:grid;place-items:center;font-size:24px;color:#fff`, CHECK),
+}));
+const labels = ['Click', 'Sign-up', 'Emails', 'Call', 'Sale'].map((n, i) => el('labels', `left:${X[i] - 450}px`, n, 'lbl big'));
+// emails
+const MAILS = [['Day 0', 'Welcome to the challenge', 15.2], ['Day 2', 'Your first quick win', 16.0], ['Day 5', 'Ready for the next step?', 16.8]];
+const mails = MAILS.map(([d, s], i) => el('c3', `left:3380px;top:${150 + i * 166}px;width:640px;height:146px;display:flex;align-items:center;gap:22px;padding:0 28px`,
+  `<span style="width:84px;height:84px;border-radius:22px;background:var(--i100);color:var(--i600);display:grid;place-items:center;font-size:42px">${MAIL}</span><span style="flex:1"><span class="mono" style="display:block;font-size:20px;color:var(--i600)">${d}</span><span style="font-weight:700;font-size:28px">${s}</span></span><span class="st chip" style="height:48px;padding:0 18px;background:#DCFAE6;color:#067647;font-size:20px">${CHECK}Sent</span>`, 'card'));
+// calendar
+const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((d, i) => el('c4days', 'flex:1;height:84px;border-radius:18px;border:3px solid var(--n200);display:grid;place-items:center;font-weight:700;font-size:22px', `<span style="text-align:center">${d}<br><span class="mono" style="font-weight:500;font-size:18px;color:var(--n500)">${12 + i}</span></span>`, ''));
+const slots = ['9:00', '10:30', '14:00'].map((s) => el('c4slots', 'flex:1;height:60px;border-radius:30px;border:3px solid var(--n200);display:grid;place-items:center;font-size:22px', s, 'mono'));
+// Ana's tags
+const TAGS = [['webinar', 12.8, 'var(--lime)', 'var(--ink)'], ['call booked', 21.6, 'var(--i100)', 'var(--i700)'], ['customer', 24.6, 'var(--ink)', 'var(--lime)']].map(([n, at, bg, fg]) => {
+  const s = document.createElement('span'); s.className = 'chip'; s.style.cssText = `font-size:20px;padding:6px 14px;background:${bg};color:${fg};transform-origin:0 50%`; s.textContent = n; $('anaTags').appendChild(s); return { s, at };
+});
+// the thousand others
+const R = rnd(42);
+const crowd = Array.from({ length: 90 }, (_, i) => ({ e: el('crowd', `width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:32px;border:6px solid #fff;background:${['var(--i500)', 'var(--i300)', 'var(--i400)', 'var(--lime)', 'var(--ink)'][i % 5]}`), lag: i * 78 + R() * 50, dy: (R() - 0.5) * 150, v: 0.9 + R() * 0.2 }));
+const STATS = [['Sign-ups', 1000, ''], ['Calls booked', 212, ''], ['Sales', 86, ''], ['Revenue', 25542, '$']].map(([k, v, pre]) => {
+  const e = el('stats', '', `<div class="n big"></div><div class="k">${k}</div>`, ''); return { e, n: e.querySelector('.n'), v, pre };
+});
+
+// ------------------------------------------------------------------ one frame
+function render(t) {
+  // Ana travels, the camera follows
+  const ax = kf(t, [[3.0, 420], [4.4, X[0]], [5.6, X[0]], [7.0, X[1]], [14.2, X[1]], [15.4, X[2]], [18.4, X[2]], [19.6, X[3]], [22.4, X[3]], [23.5, X[4]]]);
+  const ay = pathY(ax);
+  const cx = kf(t, [[2.4, 420], [3.8, 900], [4.4, X[0]], [5.6, X[0]], [7.0, X[1]], [14.2, X[1]], [15.4, X[2]], [18.4, X[2]], [19.6, X[3]], [22.4, X[3]], [23.5, X[4]], [OVERVIEW, X[4]], [27.0, 3550]]);
+  const cy = kf(t, [[2.4, 700], [3.8, 520], [10.4, 520], [11.0, 480], [13.6, 480], [14.2, 520], [OVERVIEW, 520], [27.0, 420]]);
+  const z = kf(t, [[2.4, 1.6], [3.8, 1], [10.4, 1], [11.0, 1.2], [13.6, 1.2], [14.2, 1], [OVERVIEW, 1], [27.0, 0.263]]) * (1 + Math.max(0, t - 27) * 0.004);
+  $('world').style.transform = `translate(${960 - cx * z}px, ${540 - cy * z}px) scale(${z})`;
+  const over = prog(t, OVERVIEW + 0.4, 1.2);
+
+  // journey line + stations
+  $('pathClip').style.width = (t < CROWD ? ax : lerp(ax, 6900, eInOut(prog(t, CROWD, 1.2)))) + 'px';
+  nodes.forEach((n, i) => {
+    const k = eBack(prog(t, DONE[i], 0.4), 2.4), on = t >= DONE[i];
+    n.ring.style.background = on ? 'var(--ok)' : '#fff'; n.ring.style.borderColor = on ? 'var(--ok)' : 'var(--i300)';
+    n.ring.style.transform = `scale(${(on ? 0.7 + 0.3 * k : 1) * lerp(1, 2.4, over)})`;
+    n.stem.style.opacity = 1 - over;
+  });
+  labels.forEach((l, i) => pop(l, t, 26.3 + i * 0.12, { dy: 60 }));
+
+  // Ana
+  const a = $('ana'), ak = eBack(prog(t, 0.4, 0.5), 2.6), pulse = 1 + 0.06 * Math.sin(t * 5);
+  a.style.left = ax + 'px'; a.style.top = ay + 'px'; a.style.transform = `scale(${Math.max(0.001, ak) * pulse * lerp(1, 1.6, over)})`;
+  const L = $('anaL'); L.style.left = ax - 26 + 'px'; L.style.top = ay - 112 + 'px';
+  const lk = eBack(prog(t, 1.3, 0.45)); L.style.transform = `scale(${Math.max(0.001, lk)})`; L.style.opacity = clamp(lk * 3) * (1 - over);
+  TAGS.forEach(({ s, at }) => { const k = eBack(prog(t, at, 0.4), 2.6); s.style.display = t >= at ? 'inline-flex' : 'none'; s.style.transform = `scale(${Math.max(0.001, k)})`; });
+
+  // 1 · post: cursor comes in, clicks the link
+  pop($('c1'), t, 2.9);
+  const ck = eInOut(prog(t, 3.5, 0.7)), press = t > 4.25 && t < 4.42;
+  Object.assign($('cur').style, { left: lerp(1500, 1010, ck) + 'px', top: lerp(760, 520, ck) + 'px', opacity: clamp((t - 3.4) * 4) * (1 - prog(t, 4.9, 0.3)), transform: `scale(${press ? 0.84 : 1})` });
+  $('c1link').style.borderColor = t > 4.3 ? 'var(--i500)' : 'var(--i100)';
+  const rk = prog(t, 4.3, 0.6); Object.assign($('c1rip').style, { left: '250px', top: '330px', opacity: rk > 0 && rk < 1 ? 1 - rk : 0, transform: `scale(${0.3 + rk * 1.6})` });
+
+  // 2 · landing page builds itself, then Ana signs up
+  pop($('c2'), t, 5.9);
+  pop($('c2hero'), t, 7.7, { dy: 30 }); pop($('c2img'), t, 8.15, { dy: 30 }); pop($('c2form'), t, 8.6, { dy: 30 });
+  $('c2url').textContent = t < 9.1 ? 'scalo.app/p/free-guide' : typed('yourbrand.com/free-guide', prog(t, 9.1, 0.8));
+  const mk = prog(t, 11.0, 1.0); $('c2mail').textContent = typed('ana@studio.co', mk);
+  $('c2mail').style.color = 'var(--ink)'; $('c2in').style.borderColor = t > 10.9 && t < 12.2 ? 'var(--i500)' : 'var(--n200)';
+  $('c2caret').style.opacity = t > 10.9 && t < 12.2 && Math.floor(t * 3) % 2 === 0 ? 1 : 0;
+  const sent = t >= 12.2, bp = t > 12.1 && t < 12.28;
+  Object.assign($('c2btn').style, { background: sent ? 'var(--ok)' : 'var(--i500)', transform: `scale(${bp ? 0.92 : 1})` }); $('c2btn').innerHTML = sent ? CHECK + '&nbsp;You’re in' : 'Get it';
+
+  // 3 · emails go out on their own
+  mails.forEach((m, i) => {
+    pop(m, t, 14.6 + i * 0.14, { dy: 40 });
+    const at = MAILS[i][2], k = eBack(prog(t, at, 0.4), 2.4), st = m.querySelector('.st');
+    st.style.transform = `scale(${Math.max(0.001, k)})`; st.style.opacity = clamp(k * 3);
+    m.style.borderColor = t >= at && t < at + 0.5 ? 'var(--i500)' : 'var(--n200)';
+  });
+
+  // 4 · she books a call
+  pop($('c4'), t, 18.6);
+  days.forEach((d, i) => { const on = i === 3 && t >= 20.9; d.style.background = on ? 'var(--i500)' : '#fff'; d.style.borderColor = on ? 'var(--i500)' : 'var(--n200)'; d.style.color = on ? '#fff' : 'var(--ink)'; d.querySelector('.mono').style.color = on ? '#fff' : 'var(--n500)'; });
+  slots.forEach((s, i) => { const on = i === 1 && t >= 21.2; s.style.background = on ? 'var(--ink)' : '#fff'; s.style.borderColor = on ? 'var(--ink)' : 'var(--n200)'; s.style.color = on ? '#fff' : 'var(--ink)'; });
+  const okk = eBack(prog(t, 21.5, 0.4), 2.4); $('c4ok').style.transform = `scale(${Math.max(0.001, okk)})`; $('c4ok').style.opacity = clamp(okk * 3);
+
+  // 5 · she buys
+  pop($('c5'), t, 22.6);
+  const paid = t >= 24.5, pp = t > 24.2 && t < 24.4;
+  Object.assign($('c5btn').style, { background: paid ? 'var(--ok)' : 'var(--ink)', transform: `scale(${pp ? 0.94 : 1})` }); $('c5btn').innerHTML = paid ? CHECK + 'Paid' : 'Pay $297';
+  const gk = prog(t, 24.5, 0.8); Object.assign($('c5ring').style, { opacity: gk > 0 && gk < 1 ? (1 - gk) * 0.8 : 0, transform: `scale(${0.4 + gk * 1.8})` });
+
+  // a thousand more
+  crowd.forEach((c) => {
+    const x = 200 + (t - CROWD) * 2500 * c.v - c.lag, on = t >= CROWD && x > 200;
+    const xx = Math.min(x, 6900), fade = 1 - clamp((x - 6900) / 300);
+    Object.assign(c.e.style, { left: xx + 'px', top: pathY(xx) + c.dy + 'px', opacity: on ? clamp((x - 200) / 200) * fade : 0 });
+  });
+  const sk = eOut(prog(t, CROWD + 0.2, 2.6));
+  STATS.forEach((s, i) => { pop(s.e, t, CROWD + i * 0.12, { dy: 40 }); s.n.textContent = s.pre + fmt(s.v * sk); });
+  $('stats').style.opacity = t < CROWD ? 0 : 1;
+
+  // day counter
+  const day = t < 3 ? '' : t < 5.6 ? 'Tuesday · 9:02 am' : t < 16.0 ? 'Day 0' : t < 16.8 ? 'Day 2' : t < 22.4 ? 'Day 5' : 'Day 9';
+  $('hud').textContent = day; $('hud').style.opacity = (day ? clamp((t - 3) * 3) : 0) * (1 - over);
+
+  // end card
+  const ek = prog(t, END, 0.7); $('end').style.opacity = eInOut(ek); $('end').style.display = ek > 0 ? 'block' : 'none';
+  const lg = eOut(prog(t, END + 0.2, 0.9)); $('logo').style.transform = `scale(${lerp(0.9, 1, lg) + Math.max(0, t - END) * 0.004})`; $('logo').style.opacity = lg;
+  document.querySelectorAll('.lp').forEach((p, i) => { const k = eBack(prog(t, END + 0.45 + i * 0.14, 0.5), 2.2); p.style.transform = `translateY(${(1 - k) * 14}px)`; p.style.opacity = clamp(k * 3); });
+  pop($('etag'), t, 32.6, { d: 0.6, from: 0.96, dy: 30 });
+  pop($('ecta'), t, 34.0, { d: 0.5, from: 0.85, dy: 30 });
+
+  // captions
+  const line = CAPTIONS && LINES.find(([a, d]) => t >= a - 0.1 && t < a + d + 0.55);
+  if (line) { const k = eOut(prog(t, line[0] - 0.1, 0.25)) * (1 - prog(t, line[0] + line[1] + 0.35, 0.2)); $('cap').innerHTML = `<span>${line[2]}</span>`; $('cap').style.opacity = k; $('cap').style.transform = `translateY(${(1 - k) * 14}px)`; }
+  else $('cap').innerHTML = '';
+}
+window.DURATION = DURATION;
+window.render = render;
+window.ready = document.fonts.ready.then(() => { render(0); return true; });
+if (location.search.includes('play')) { const t0 = performance.now(); const loop = () => { render(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(loop); }; document.fonts.ready.then(loop); }
+</script>
+</body>
+</html>

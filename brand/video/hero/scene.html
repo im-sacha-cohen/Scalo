@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Scalo — hero demo loop</title>
+<style>
+@font-face { font-family: Inter; font-weight: 500; src: url(../fonts/fontsource-inter/files/inter-latin-500-normal.woff2); }
+@font-face { font-family: Inter; font-weight: 600; src: url(../fonts/fontsource-inter/files/inter-latin-600-normal.woff2); }
+@font-face { font-family: Inter; font-weight: 700; src: url(../fonts/fontsource-inter/files/inter-latin-700-normal.woff2); }
+@font-face { font-family: Jakarta; font-weight: 800; src: url(../fonts/fontsource-plus-jakarta-sans/files/plus-jakarta-sans-latin-800-normal.woff2); }
+@font-face { font-family: Mono; font-weight: 500; src: url(../fonts/fontsource-jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2); }
+:root {
+  --i50:#F6F5FF; --i100:#ECEAFF; --i200:#D6D1FF; --i300:#B3A9FF; --i400:#8A7CFF; --i500:#5B4BFF; --i600:#4A38E8;
+  --i700:#3A2BC0; --i900:#1A1458; --ink:#0E0B2B; --lime:#C6F432; --n200:#E4E3EC; --n500:#8B89A0; --n800:#3B3950; --ok:#12B76A;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1200px; height: 960px; overflow: hidden; background: var(--i900); }
+body { font-family: Inter, sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; }
+#stage { position: relative; width: 1200px; height: 960px; overflow: hidden; background: var(--i900); }
+.abs { position: absolute; left: 0; top: 0; }
+.big { font-family: Jakarta, sans-serif; font-weight: 800; letter-spacing: -0.04em; line-height: 1; white-space: nowrap; }
+.mono { font-family: Mono, monospace; }
+.dots { position: absolute; inset: 0; background-image: radial-gradient(circle, rgba(255,255,255,.07) 2px, transparent 2.5px); background-size: 40px 40px; }
+svg.ic { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.chip { display: inline-flex; align-items: center; gap: 10px; border-radius: 999px; font-weight: 600; white-space: nowrap; }
+.bar { height: 16px; border-radius: 8px; background: var(--n200); }
+#steps { position: absolute; left: 60px; right: 60px; top: 52px; display: flex; gap: 14px; }
+#steps .chip { flex: 1; height: 76px; justify-content: center; font-size: 30px; font-weight: 700; }
+#prog { position: absolute; left: 60px; top: 150px; height: 8px; border-radius: 4px; background: var(--lime); }
+#progBg { position: absolute; left: 60px; right: 60px; top: 150px; height: 8px; border-radius: 4px; background: rgba(255,255,255,.12); }
+#win { position: absolute; left: 60px; top: 200px; width: 1080px; height: 700px; background: #fff; border-radius: 36px; overflow: hidden; box-shadow: 0 50px 90px -40px rgba(0,0,0,.6); }
+.view { position: absolute; inset: 96px 0 0 0; }
+.row { position: absolute; left: 50px; width: 980px; height: 132px; border-radius: 28px; border: 3px solid var(--n200); background: #fff; display: flex; align-items: center; gap: 26px; padding: 0 30px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="dots"></div>
+  <div id="steps"></div>
+  <div id="progBg"></div><div id="prog"></div>
+
+  <div id="win">
+    <!-- window bar -->
+    <div style="height:96px;border-bottom:3px solid var(--n200);display:flex;align-items:center;padding:0 28px;gap:12px">
+      <i style="width:20px;height:20px;border-radius:10px;background:var(--n200)"></i><i style="width:20px;height:20px;border-radius:10px;background:var(--n200)"></i><i style="width:20px;height:20px;border-radius:10px;background:var(--n200)"></i>
+      <div style="margin-left:18px;flex:1;height:60px;border-radius:30px;background:var(--i50);display:flex;align-items:center;gap:12px;padding:0 24px;font-size:27px;color:var(--n800)"><svg class="ic" viewBox="0 0 24 24" style="color:var(--ok)"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span class="mono" id="url"></span></div>
+      <div id="pub" class="chip" style="height:64px;padding:0 32px;background:var(--i500);color:#fff;font-size:29px;font-weight:700">Publish</div>
+    </div>
+
+    <!-- A/B · editor -->
+    <div class="view" id="vEdit">
+      <div id="pal" style="position:absolute;left:0;top:0;bottom:0;width:270px;padding:26px 22px;display:flex;flex-direction:column;gap:16px;border-right:3px solid var(--n200)"></div>
+      <div style="position:absolute;left:270px;right:0;top:0;bottom:0;background:#EFEEF6">
+        <div style="position:absolute;left:50px;top:36px;width:710px;height:530px;background:#fff;border-radius:24px;overflow:hidden">
+          <div style="padding:38px 40px 34px;background:var(--ink)"><div class="big" style="font-size:52px;color:#fff">The 7-day launch kit</div><div class="bar" style="margin-top:20px;width:72%;background:rgba(255,255,255,.25)"></div></div>
+          <div id="eImg" style="margin:24px 40px 0;height:140px;border-radius:20px;background:var(--i100);display:grid;place-items:center;font-size:64px;color:var(--i400);transform-origin:50% 0"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg></div>
+          <div id="eSlot" style="position:absolute;left:40px;right:40px;top:350px;height:96px;border-radius:20px;border:4px dashed var(--i300);background:var(--i50)"></div>
+          <div id="eForm" style="position:absolute;left:40px;right:40px;top:356px;display:flex;gap:14px;transform-origin:50% 50%"><div style="flex:1;height:84px;border-radius:20px;border:3px solid var(--n200);display:flex;align-items:center;padding:0 22px;font-size:28px;color:var(--n500)">you@email.com</div><div style="height:84px;border-radius:42px;background:var(--i500);color:#fff;font-weight:700;font-size:29px;display:flex;align-items:center;padding:0 34px">Get it</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- C · the live page, seen by a visitor -->
+    <div class="view" id="vPage" style="background:#EFEEF6">
+      <div style="position:absolute;left:130px;top:36px;width:820px;height:530px;background:#fff;border-radius:24px;overflow:hidden">
+        <div style="padding:40px 46px 36px;background:var(--ink)"><div class="big" style="font-size:60px;color:#fff">The 7-day launch kit</div><div class="bar" style="margin-top:22px;width:72%;background:rgba(255,255,255,.25)"></div></div>
+        <div style="margin:26px 46px 0;height:120px;border-radius:20px;background:var(--i100)"></div>
+        <div style="margin:26px 46px 0;display:flex;gap:14px"><div id="pIn" style="flex:1;height:92px;border-radius:22px;border:4px solid var(--n200);display:flex;align-items:center;padding:0 24px;font-size:32px"><span class="mono" id="pMail"></span><i id="pCaret" style="width:4px;height:40px;background:var(--i500);margin-left:3px"></i></div><div id="pBtn" style="height:92px;min-width:210px;border-radius:46px;background:var(--i500);color:#fff;font-weight:700;font-size:31px;display:flex;align-items:center;justify-content:center;gap:10px;padding:0 34px">Get it</div></div>
+      </div>
+    </div>
+
+    <!-- D · the follow-up sequence -->
+    <div class="view" id="vSeq">
+      <div style="position:absolute;left:50px;top:30px;right:50px;display:flex;align-items:center;justify-content:space-between"><div class="big" style="font-size:46px">Welcome sequence</div><span class="chip" style="height:56px;padding:0 24px;background:#DCFAE6;color:#067647;font-size:26px"><i style="width:16px;height:16px;border-radius:8px;background:var(--ok)"></i>Sending to Ana López</span></div>
+      <div id="rows"></div>
+    </div>
+  </div>
+
+  <!-- dragged block -->
+  <div class="abs" id="ghost" style="width:330px;height:84px;border-radius:20px;background:#fff;border:4px solid var(--i500);box-shadow:0 30px 50px -16px rgba(91,75,255,.6);display:flex;align-items:center;gap:14px;padding:0 22px;font-weight:700;font-size:28px;color:var(--i600)"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 12h6"/></svg>Opt-in form</div>
+  <!-- toast -->
+  <div class="abs chip" id="toast" style="left:452px;top:560px;height:88px;padding:0 34px;background:var(--ink);color:#fff;font-size:30px;box-shadow:0 30px 60px -24px rgba(0,0,0,.6)"><i style="width:20px;height:20px;border-radius:10px;background:var(--ok)"></i>Live on <span class="mono" style="color:var(--lime)">yourbrand.com</span></div>
+  <!-- new lead -->
+  <div class="abs" id="lead" style="left:560px;top:620px;width:580px;padding:32px 36px;border-radius:32px;background:#fff;border:3px solid var(--n200);box-shadow:0 50px 80px -30px rgba(0,0,0,.65)">
+    <div class="chip" style="font-size:26px;color:var(--i600)"><svg class="ic" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>New lead</div>
+    <div style="display:flex;align-items:center;gap:22px;margin-top:20px"><div style="width:92px;height:92px;border-radius:46px;background:var(--i500);color:#fff;display:grid;place-items:center;font-weight:700;font-size:34px">AL</div><div><div class="big" style="font-size:44px">Ana López</div><div class="mono" style="font-size:25px;color:var(--n500);margin-top:8px">ana@studio.co</div></div></div>
+    <div style="margin-top:22px;height:58px"><span class="chip" id="tag" style="height:58px;padding:0 24px;background:var(--lime);font-size:27px;transform-origin:0 50%"><svg class="ic" viewBox="0 0 24 24"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><circle cx="7" cy="7" r="1.5"/></svg>webinar</span></div>
+  </div>
+  <svg class="abs" id="cur" viewBox="0 0 24 24" style="width:64px;height:64px"><path d="M4 2l16 9.5-7 1.5 4 7.5-3 1.5-4-7.5L4 19z" fill="#0E0B2B" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>
+</div>
+
+<script>
+// Silent, seamless 18 s loop for the landing hero: build → publish → capture → follow up. Frame 0 = frame 18 s (empty panel).
+const DURATION = 18;
+const STEPS = [['Build', 0.3], ['Publish', 4.6], ['Capture', 7.6], ['Follow up', 12.4]];
+const OUT = 17.0;                        // everything fades out from here
+
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, k) => a + (b - a) * k;
+const prog = (t, a, d) => clamp((t - a) / d);
+const eOut = (k) => 1 - Math.pow(1 - k, 3);
+const eInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+const eBack = (k, c1 = 1.9) => { const c3 = c1 + 1; return 1 + c3 * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2); };
+function pop(e, t, a, { d = 0.45, from = 0.86, dy = 20 } = {}) {
+  const k = prog(t, a, d); e.style.opacity = clamp(k * 2.5); e.style.transform = `translateY(${(1 - eOut(k)) * dy}px) scale(${lerp(from, 1, eBack(k))})`;
+}
+const typed = (s, k) => s.slice(0, Math.round(clamp(k) * s.length));
+function el(parent, css, html = '', cls = '') { const e = document.createElement('div'); e.className = cls; e.style.cssText = css; e.innerHTML = html; $(parent).appendChild(e); return e; }
+const CHECK = '<svg class="ic" viewBox="0 0 24 24" style="stroke-width:3"><path d="M20 6 9 17l-5-5"/></svg>';
+const MAIL = '<svg class="ic" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>';
+
+const steps = STEPS.map(([n], i) => el('steps', '', `<span class="mono" style="font-size:24px;opacity:.6">${i + 1}</span>${n}`, 'chip'));
+const pal = ['Heading', 'Image', 'Opt-in form', 'Button'].map((n) => el('pal', 'height:76px;border-radius:18px;background:var(--i50);display:flex;align-items:center;padding:0 20px;font-weight:600;font-size:27px;color:var(--n800)', n));
+const MAILS = [['Day 0', 'Welcome to the challenge', 13.4], ['Day 2', 'Your first quick win', 14.3], ['Day 5', 'Ready for the next step?', 15.2]];
+const rows = MAILS.map(([d, s], i) => el('rows', `top:${118 + i * 152}px`,
+  `<span style="width:84px;height:84px;border-radius:22px;background:var(--i100);color:var(--i600);display:grid;place-items:center;font-size:44px">${MAIL}</span><span style="flex:1"><span class="mono" style="display:block;font-size:24px;color:var(--i600)">${d}</span><span style="font-weight:700;font-size:33px">${s}</span></span><span class="st chip" style="height:56px;padding:0 22px;background:#DCFAE6;color:#067647;font-size:26px">${CHECK}Sent</span>`, 'row'));
+
+function render(t) {
+  const out = 1 - eInOut(prog(t, OUT, 0.7));
+  // steps + progress
+  const cur = STEPS.filter(([, a]) => t >= a).length - 1;
+  steps.forEach((s, i) => { const on = i === cur && t < OUT; s.style.background = on ? 'var(--lime)' : 'rgba(255,255,255,.1)'; s.style.color = on ? 'var(--ink)' : i < cur && t < OUT ? '#fff' : 'var(--i200)'; });
+  $('prog').style.width = 1080 * prog(t, 0.3, OUT - 0.3) * (t < OUT ? 1 : 0) + 'px'; $('prog').style.opacity = out;
+
+  // window
+  const wk = eOut(prog(t, 0.2, 0.6));
+  $('win').style.opacity = Math.min(wk, out); $('win').style.transform = `translateY(${(1 - wk) * 40 + (1 - out) * 20}px) scale(${lerp(0.97, 1, wk)})`;
+  const toPage = eInOut(prog(t, 7.3, 0.5)), toSeq = eInOut(prog(t, 12.1, 0.5));
+  $('vEdit').style.opacity = 1 - toPage; $('vPage').style.opacity = toPage * (1 - toSeq); $('vSeq').style.opacity = toSeq;
+  $('vPage').style.transform = `scale(${lerp(0.94, 1, toPage)})`; $('vSeq').style.transform = `translateY(${(1 - toSeq) * 30}px)`;
+
+  // 1 · build: drag the opt-in form into the page
+  pop($('eImg'), t, 1.0, { dy: 30 });
+  const grab = 1.9, drop = 3.3;
+  const dk = eInOut(prog(t, grab + 0.25, drop - grab - 0.35));
+  const gx = lerp(82, 430, dk), gy = lerp(492, 658, dk);
+  const held = t >= grab && t < drop;
+  Object.assign($('ghost').style, { left: gx + 'px', top: gy + 'px', opacity: held ? 1 : 0, transform: `rotate(${-3 * Math.sin(Math.PI * dk)}deg) scale(${held ? 1.03 : 1})` });
+  pal[2].style.opacity = held ? 0.35 : 1;
+  $('eSlot').style.opacity = clamp((t - grab - 0.3) * 4) * (t < drop ? 1 : 0);
+  const fk = eBack(prog(t, drop, 0.45), 2.6); $('eForm').style.opacity = t >= drop ? 1 : 0; $('eForm').style.transform = `scale(${0.9 + 0.1 * fk})`;
+
+  // 2 · publish
+  const live = t >= 5.5, press = t > 5.4 && t < 5.58;
+  Object.assign($('pub').style, { background: live ? 'var(--ok)' : 'var(--i500)', transform: `scale(${press ? 0.9 : 1})` }); $('pub').innerHTML = live ? CHECK + 'Live' : 'Publish';
+  $('url').textContent = t < 5.7 ? 'scalo.app/p/launch-kit' : typed('yourbrand.com/launch-kit', prog(t, 5.7, 0.7));
+  const tk = eBack(prog(t, 5.9, 0.45), 2.2); Object.assign($('toast').style, { opacity: clamp(tk * 3) * (1 - prog(t, 7.2, 0.3)), transform: `translateY(${(1 - tk) * -40}px) scale(${0.85 + 0.15 * tk})` });
+
+  // 3 · capture: a visitor signs up, the lead appears
+  const mk = prog(t, 8.3, 1.0); $('pMail').textContent = typed('ana@studio.co', mk);
+  const typing = t > 8.1 && t < 9.7;
+  $('pIn').style.borderColor = typing ? 'var(--i500)' : 'var(--n200)'; $('pCaret').style.opacity = typing && Math.floor(t * 3) % 2 === 0 ? 1 : 0;
+  const inn = t >= 9.7, bp = t > 9.6 && t < 9.78;
+  Object.assign($('pBtn').style, { background: inn ? 'var(--ok)' : 'var(--i500)', transform: `scale(${bp ? 0.92 : 1})` }); $('pBtn').innerHTML = inn ? CHECK + 'You’re in' : 'Get it';
+  const lk = eBack(prog(t, 10.1, 0.55), 1.6), lo = 1 - eInOut(prog(t, 11.9, 0.4));
+  Object.assign($('lead').style, { opacity: clamp(lk * 3) * lo, transform: `translateX(${(1 - lk) * 220}px) translateY(${(1 - lo) * 40}px) rotate(${(1 - lk) * 4}deg)` });
+  const gk = eBack(prog(t, 10.8, 0.4), 2.8); $('tag').style.transform = `scale(${Math.max(0.001, gk)})`;
+
+  // 4 · follow up: the sequence sends itself
+  rows.forEach((r, i) => {
+    pop(r, t, 12.35 + i * 0.12, { dy: 40 });
+    const at = MAILS[i][2], k = eBack(prog(t, at, 0.4), 2.6), st = r.querySelector('.st');
+    st.style.transform = `scale(${Math.max(0.001, k)})`; st.style.opacity = clamp(k * 3);
+    r.style.borderColor = t >= at && t < at + 0.55 ? 'var(--i500)' : 'var(--n200)';
+  });
+
+  // cursor
+  let cx, cy, co = 1, cs = 1;
+  if (t < grab) { const k = eInOut(prog(t, 1.1, 0.75)); cx = lerp(700, 250, k); cy = lerp(980, 520, k); co = clamp((t - 1.0) * 4); }
+  else if (t < drop) { cx = gx + 168; cy = gy + 28; cs = 0.88; }
+  else if (t < 7.3) { const k = eInOut(prog(t, 4.5, 0.85)); cx = lerp(598, 1040, k); cy = lerp(686, 262, k); cs = press ? 0.85 : 1; co = 1 - prog(t, 6.6, 0.4); }
+  else if (t < 12.1) { const k = eInOut(prog(t, 9.0, 0.6)); cx = lerp(1230, 900, k); cy = lerp(900, 690, k); cs = bp ? 0.85 : 1; co = clamp((t - 9.0) * 4) * (1 - prog(t, 10.0, 0.3)); }
+  else { cx = 0; cy = 0; co = 0; }
+  Object.assign($('cur').style, { left: cx + 'px', top: cy + 'px', opacity: co * out, transform: `scale(${cs})` });
+}
+window.DURATION = DURATION;
+window.render = render;
+window.ready = document.fonts.ready.then(() => { render(0); return true; });
+if (location.search.includes('play')) { const t0 = performance.now(); const loop = () => { render(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(loop); }; document.fonts.ready.then(loop); }
+</script>
+</body>
+</html>

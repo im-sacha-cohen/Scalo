@@ -11,6 +11,7 @@ import {
   Mail,
   MailCheck,
   Menu,
+  Play,
   Plus,
   Split,
   Tag,
@@ -189,6 +190,30 @@ function HeroStairs() {
   );
 }
 
+/** Silent product demo on a loop: build → publish → capture → follow up. Source: brand/video/hero/. */
+function HeroDemo() {
+  // People who ask for reduced motion get the static illustration instead of an autoplaying video.
+  const [still] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  if (still) return <HeroStairs />;
+  return (
+    <div className="landing-rise mx-auto w-full max-w-[600px] overflow-hidden rounded-3xl border border-white/10 bg-brand-900" style={{ animationDelay: '250ms' }}>
+      <video
+        className="block aspect-[5/4] w-full"
+        poster="/video/scalo-hero-demo.jpg"
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload="metadata"
+        aria-label="Scalo demo: build a page, publish it, capture a lead, and the follow-up emails send themselves"
+      >
+        <source src="/video/scalo-hero-demo.webm" type="video/webm" />
+        <source src="/video/scalo-hero-demo.mp4" type="video/mp4" />
+      </video>
+    </div>
+  );
+}
+
 function Hero() {
   const { user } = useAuth();
   return (
@@ -221,8 +246,51 @@ function Hero() {
             Free plan · No credit card required
           </p>
         </div>
-        <HeroStairs />
+        <HeroDemo />
       </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- film
+
+/** Motion-design launch film (English voice-over, key lines subtitled). Source: brand/video/. */
+function Film() {
+  const video = useRef<HTMLVideoElement>(null);
+  const [started, setStarted] = useState(false);
+  const start = () => {
+    setStarted(true);
+    void video.current?.play();
+  };
+  return (
+    <section id="video" className="bg-ink pb-24 text-white sm:pb-32">
+      <Reveal className="mx-auto max-w-5xl px-5 sm:px-8">
+        <div className="relative aspect-video overflow-hidden rounded-3xl border border-white/10 bg-ink">
+          <video
+            ref={video}
+            className="h-full w-full"
+            poster="/video/scalo-presentation.jpg"
+            preload="none"
+            playsInline
+            controls={started}
+            onEnded={() => setStarted(false)}
+          >
+            <source src="/video/scalo-presentation.webm" type="video/webm" />
+            <source src="/video/scalo-presentation.mp4" type="video/mp4" />
+          </video>
+          {!started && (
+            <button onClick={start} className="group absolute inset-0" aria-label="Play the Scalo video (36 seconds, with sound)">
+              <span className="absolute bottom-4 left-4 inline-flex items-center gap-2.5 rounded-full bg-lime-400 py-2.5 pr-5 pl-3 text-[15px] font-semibold text-ink transition-transform group-hover:scale-105 group-active:scale-95 sm:bottom-6 sm:left-6">
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-lime-400">
+                  <Play size={14} fill="currentColor" className="ml-0.5" />
+                </span>
+                Play · 0:36
+              </span>
+            </button>
+          )}
+        </div>
+        <p className="mt-4 text-center text-[13px] text-brand-300">Scalo in 36 seconds · Sound on</p>
+      </Reveal>
     </section>
   );
 }
@@ -685,6 +753,7 @@ export function LandingPage() {
       <Nav />
       <main>
         <Hero />
+        <Film />
         <Stack />
         <Product />
         <How />
