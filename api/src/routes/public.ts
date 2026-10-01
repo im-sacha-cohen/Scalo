@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { blocksOfType, esc, pageHasCustomCode, renderPageDocument, type PageContent } from '@scalo/shared';
+import { blocksOfType, esc, flattenBlocks, pageHasCustomCode, renderPageDocument, type PageContent } from '@scalo/shared';
 import bcrypt from 'bcryptjs';
 import type { StepAccess } from '@scalo/shared';
 import { db, nowIso } from '../db';
@@ -10,6 +10,8 @@ import { getSettingsRow } from '../services/email';
 import { poweredByPageHtml } from '../services/branding';
 import { fieldVars, formFieldChanges, listFieldDefs } from '../services/fields';
 import { confirmOptin, lookupOptin, requestOptin } from '../services/optin';
+import { registerPaymentHost } from '../services/checkout';
+import { PAY_SCRIPT, STRIPE_JS } from '../services/pay-page';
 import { paymentRenderContext } from '../services/payments';
 import { recordAffiliateLead, trackAffiliateVisit } from '../services/affiliates';
 import { hmac, signId, verifyPreviewToken, verifySignedId } from '../util';
@@ -281,15 +283,22 @@ export async function viewStep(req: Request, res: Response, r: Resolved) {
       return s ? { name: s.name, href: stepUrl(funnel, s) + qs } : null;
     },
   });
+  // payment blocks: form targets + current name / price of the offers they sell ({} when the page has none). The order
+  // forms pay on the page with Stripe Elements — except on a sandboxed page (custom code), where Stripe.js cannot run:
+  // there the form is posted and the buyer pays on Scalo's payment page.
+  const sandboxed = pageHasCustomCode(content);
+  const pay = await paymentRenderContext(funnel.user_id, content, stepUrl(funnel, step), qs, req.query.pay);
+  const payOnPage = !!pay.stripeKey && !sandboxed && !preview && flattenBlocks(content.blocks ?? []).some((b) => b.type === 'checkout');
+  if (payOnPage) registerPaymentHost(req, funnel.user_id);
   let html = renderPageDocument(content, {
     title: step.name,
     nextUrl: r.nextUrl + qs,
     formAction: `${stepUrl(funnel, step)}/submit${qs}`,
-    // payment blocks: form targets + current name / price of the offers they sell ({} when the page has none)
-    ...(await paymentRenderContext(funnel.user_id, content, stepUrl(funnel, step), qs, req.query.pay)),
+    ...pay,
+    stripeKey: payOnPage ? pay.stripeKey : undefined,
     vars,
     headExtra: extras.headExtra,
-    bodyEnd: extras.bodyEnd + (await poweredByPageHtml(funnel.user_id)),
+    bodyEnd: extras.bodyEnd + (payOnPage ? STRIPE_JS + PAY_SCRIPT : '') + (await poweredByPageHtml(funnel.user_id)),
   });
   if (req.query.error === 'email') {
     const banner = `<div role="alert" style="max-width:${Number(content.settings?.maxWidth) || 880}px;margin:0 auto;background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;padding:12px 16px;font-family:Arial,sans-serif;font-size:15px;text-align:center">Adresse email invalide. Merci de vérifier et de réessayer.</div>`;
@@ -300,7 +309,7 @@ export async function viewStep(req: Request, res: Response, r: Resolved) {
     html = html.replace('<main', `${banner}<main`);
   }
   if (!res.getHeader('Cache-Control')) res.setHeader('Cache-Control', 'no-store');
-  if (pageHasCustomCode(content)) {
+  if (sandboxed) {
     // Owner-authored HTML/JS runs in an opaque origin: it cannot read the app's storage or cookies
     // (public pages are served from the same origin as the app), but forms, links and scripts keep working.
     res.setHeader(

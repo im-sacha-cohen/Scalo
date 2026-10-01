@@ -1,9 +1,9 @@
 // Settings → Paiements: the account's own Stripe keys (stored encrypted, never shown again) and its webhook.
 import { useState, type FormEvent } from 'react';
-import { CircleCheck, Copy, CreditCard, KeyRound, PlugZap, Webhook } from 'lucide-react';
+import { CircleCheck, Copy, CreditCard, KeyRound, PlugZap, TriangleAlert, Wallet, Webhook } from 'lucide-react';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageLoader } from '../../components/ui';
+import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageLoader, Toggle } from '../../components/ui';
 import { fmtDateTime } from '../../lib/format';
 import { copyText, useLoad } from '../../lib/hooks';
 import { paymentsApi } from '../../lib/payments-api';
@@ -17,6 +17,7 @@ export function StripeSettings() {
   const [webhookSecret, setWebhookSecret] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [savingSepa, setSavingSepa] = useState(false);
 
   if (loading && !s) return <PageLoader />;
   if (error && !s) return <ErrorState message={error} onRetry={reload} />;
@@ -71,6 +72,17 @@ export function StripeSettings() {
       toast.error(err);
     }
   };
+  const toggleSepa = async (on: boolean) => {
+    setSavingSepa(true);
+    try {
+      setData(await paymentsApi.saveSettings({ sepa_debit: on }));
+      toast.success(on ? 'Prélèvement SEPA proposé aux acheteurs' : 'Prélèvement SEPA retiré');
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      setSavingSepa(false);
+    }
+  };
   const copy = async () => {
     if (await copyText(s.webhook_url)) toast.success('URL copiée');
   };
@@ -108,10 +120,15 @@ export function StripeSettings() {
                 placeholder={s.connected ? `${s.mode === 'live' ? 'sk_live' : 'sk_test'}_…${s.secret_key_hint ?? ''}` : 'sk_live_…'}
               />
             </Field>
-            <Field label="Clé publique (facultatif)" hint="Commence par pk_test_ ou pk_live_.">
+            <Field label="Clé publique" hint="Commence par pk_test_ ou pk_live_. Indispensable : le formulaire de paiement s’affiche directement dans vos pages.">
               <Input autoComplete="off" value={pk} onChange={(e) => setPublishable(e.target.value)} placeholder="pk_live_…" />
             </Field>
           </div>
+          {s.connected && !s.publishable_key && (
+            <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <TriangleAlert size={15} className="mt-0.5 shrink-0" /> Ajoutez la clé publique : sans elle, vos acheteurs ne peuvent pas payer sur vos pages.
+            </p>
+          )}
           {s.connected && s.verified_at && (
             <p className="flex items-center gap-2 text-sm text-emerald-700">
               <CircleCheck size={15} /> Connexion vérifiée le {fmtDateTime(s.verified_at)}
@@ -130,6 +147,25 @@ export function StripeSettings() {
                 Déconnecter
               </Button>
             )}
+          </div>
+
+          <div className="border-t border-slate-100 pt-5">
+            <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <Wallet size={15} className="text-slate-400" /> Moyens de paiement
+            </h4>
+            <p className="mt-1 text-sm text-slate-600">
+              L’acheteur paie sans quitter votre page : carte bancaire, Apple Pay et Google Pay (selon son appareil), validation 3-D Secure comprise. Activez Apple Pay / Google Pay dans Stripe → Paramètres → Moyens de paiement ; vos domaines
+              sont déclarés automatiquement.
+            </p>
+            <div className="mt-3">
+              <Toggle
+                checked={s.sepa_debit}
+                onChange={toggleSepa}
+                disabled={!s.connected || savingSepa}
+                label="Prélèvement SEPA"
+                description="Pour les offres en euros. Activez-le d’abord dans votre tableau de bord Stripe. L’accès est donné quand la banque confirme le prélèvement (quelques jours)."
+              />
+            </div>
           </div>
 
           <div className="border-t border-slate-100 pt-5">

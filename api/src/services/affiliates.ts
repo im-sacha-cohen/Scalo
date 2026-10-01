@@ -552,7 +552,10 @@ async function onPayment(ctx: OrderHookContext, trx: Db): Promise<void> {
 
   // lines this payment pays for: every line of the order the first time, the recurring ones afterwards
   const covered = first ? items : items.filter((i) => i.type !== 'one_time');
-  const denom = covered.reduce((n, i) => n + i.amount_total, 0);
+  // share of each line in this payment (an installment plan only brings one installment), tax excluded
+  const charged = (i: OrderItemRow) =>
+    i.type !== 'installments' || !i.installments || i.installment_amount === null ? i.amount_total : first ? i.amount_total - i.installment_amount * (i.installments - 1) : i.installment_amount;
+  const denom = covered.reduce((n, i) => n + charged(i), 0);
   if (denom <= 0) return;
   const withinMonths = () => {
     if (!program.recurring_months) return true;
@@ -574,7 +577,7 @@ async function onPayment(ctx: OrderHookContext, trx: Db): Promise<void> {
   let total = 0;
   const names: string[] = [];
   for (const item of eligible) {
-    const base = Math.round((amount * item.amount_subtotal) / denom);
+    const base = Math.round((amount * charged(item) * (item.amount_total ? item.amount_subtotal / item.amount_total : 1)) / denom);
     const rate = resolveRate(program, affiliate, rules, item);
     const value = commissionAmount(rate, base);
     if (value <= 0) continue;

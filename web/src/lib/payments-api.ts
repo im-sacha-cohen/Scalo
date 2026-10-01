@@ -18,7 +18,11 @@ export interface PriceInput {
   amount: number;
   currency: string;
   interval?: PriceInterval | null;
-  installments?: number | null;
+  interval_count?: number;
+  installments_min?: number | null;
+  installments_max?: number | null;
+  /** Surcharge in percent per number of payments. */
+  installment_fees?: Record<string, number>;
   tax_rate?: number;
   tax_inclusive?: boolean;
   active?: boolean;
@@ -56,12 +60,13 @@ export type OrderDetail = Order & {
 export const paymentsApi = {
   // Stripe connection
   settings: () => request<PaymentSettings>('GET', '/payments/settings'),
-  saveSettings: (b: { secret_key?: string; publishable_key?: string | null; webhook_secret?: string | null }) => request<PaymentSettings>('PUT', '/payments/settings', b),
+  saveSettings: (b: { secret_key?: string; publishable_key?: string | null; webhook_secret?: string | null; sepa_debit?: boolean }) => request<PaymentSettings>('PUT', '/payments/settings', b),
   testConnection: () => request<{ ok: true; settings: PaymentSettings }>('POST', '/payments/settings/test'),
   disconnect: () => request<PaymentSettings>('DELETE', '/payments/settings'),
 
   // products & offers
   products: (archived = false) => request<Product[]>('GET', `/products${archived ? '?archived=1' : ''}`),
+  product: (id: number) => request<Product>('GET', `/products/${id}`),
   createProduct: (b: ProductInput) => request<Product>('POST', '/products', b),
   updateProduct: (id: number, b: Partial<ProductInput>) => request<Product>('PATCH', `/products/${id}`, b),
   deleteProduct: (id: number) => request<Ok>('DELETE', `/products/${id}`),

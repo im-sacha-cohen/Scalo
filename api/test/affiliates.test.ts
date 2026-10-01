@@ -11,78 +11,10 @@ import { db } from '../src/db';
 import { affCookieName, commissionAmount, decodeAffCookie, encodeAffCookie } from '../src/services/affiliates';
 import { settleLoginLinks } from '../src/services/members';
 import { markOrderPaid } from '../src/services/payments';
-import { signStripePayload, StripeError, type StripeCheckoutSession, type StripeClient, type StripeFactory, type StripePaymentIntent } from '../src/services/stripe';
+import { signStripePayload } from '../src/services/stripe';
 import { EmailWorker } from '../src/worker';
+import { FakeStripe } from './fake-stripe';
 import { client, http, registerUser, shutdown, startApp, type TestCtx } from './helpers';
-
-// ---------- fake Stripe (same contract as api/test/payments.test.ts) ----------
-
-class FakeStripe {
-  sessions = new Map<string, StripeCheckoutSession>();
-  private n = 0;
-  private paid = new Map<string, number>();
-  private refunded = new Map<string, number>();
-  private id = (p: string) => `${p}_test_${++this.n}${'x'.repeat(10)}`;
-  factory: StripeFactory = () => this.client;
-
-  pay(sessionId: string) {
-    const s = this.sessions.get(sessionId)!;
-    const customer = s.customer ?? this.id('cus');
-    const pm = this.id('pm');
-    const pi = this.id('pi');
-    this.paid.set(pi, s.amount_total!);
-    Object.assign(s, { status: 'complete', payment_status: 'paid', customer });
-    if (s.mode === 'payment') {
-      s.payment_intent = { id: pi, status: 'succeeded', amount: s.amount_total!, amount_received: s.amount_total!, currency: s.currency!, customer, payment_method: pm, metadata: s.metadata };
-    } else {
-      const sub = this.id('sub');
-      s.subscription = { id: sub, status: 'active', customer, default_payment_method: pm, metadata: s.metadata };
-      s.invoice = { id: this.id('in'), amount_paid: s.amount_total!, currency: s.currency!, customer, subscription: sub, payment_intent: pi, billing_reason: 'subscription_create' };
-    }
-    return s;
-  }
-
-  client: StripeClient = {
-    retrieveAccount: async () => ({ id: 'acct_1', name: 'Boutique Test' }),
-    createCheckoutSession: async (params) => {
-      const id = this.id('cs');
-      const s: StripeCheckoutSession = {
-        id,
-        url: `https://checkout.stripe.test/pay/${id}`,
-        status: 'open',
-        payment_status: 'unpaid',
-        mode: params.mode,
-        amount_total: params.line_items.reduce((n, l) => n + l.unit_amount, 0),
-        currency: params.line_items[0].currency,
-        customer: params.customer ?? null,
-        customer_details: { email: params.customer_email ?? null },
-        payment_intent: null,
-        subscription: null,
-        invoice: null,
-        metadata: params.metadata,
-      };
-      this.sessions.set(id, s);
-      return structuredClone(s);
-    },
-    retrieveCheckoutSession: async (id) => {
-      const s = this.sessions.get(id);
-      if (!s) throw new StripeError('No such checkout.session', 404, 'resource_missing');
-      return structuredClone(s);
-    },
-    createOffSessionPayment: async (params) => {
-      const pi: StripePaymentIntent = { id: this.id('pi'), amount: params.amount, currency: params.currency, customer: params.customer, payment_method: params.payment_method, metadata: params.metadata, status: 'succeeded', amount_received: params.amount };
-      this.paid.set(pi.id, params.amount);
-      return pi;
-    },
-    createRefund: async (params) => {
-      const done = this.refunded.get(params.payment_intent) ?? 0;
-      const amount = params.amount ?? (this.paid.get(params.payment_intent) ?? 0) - done;
-      this.refunded.set(params.payment_intent, done + amount);
-      return { id: this.id('re'), amount, currency: 'eur', payment_intent: params.payment_intent, status: 'succeeded' };
-    },
-    cancelSubscription: async (id) => ({ id, status: 'canceled' }),
-  };
-}
 
 // ---------- harness ----------
 
@@ -100,6 +32,7 @@ beforeEach(async () => {
 
 type Api = ReturnType<typeof client>;
 const SK = `sk_test_${'a1B2'.repeat(6)}9f3Q`;
+const PK = `pk_test_${'c3D4'.repeat(6)}`;
 const WH = `whsec_${'e5F6'.repeat(8)}`;
 const DAY = 86400_000;
 const schedulers = () => new EmailWorker({ throttle: false }).runSchedulers();
@@ -108,7 +41,7 @@ let seq = 0;
 async function seller(programPatch: Record<string, unknown> | null = {}) {
   const reg = await registerUser(ctx, `Boutique ${++seq}`);
   const api = client(ctx, reg.token);
-  const r = await api.put('/api/payments/settings', { secret_key: SK, webhook_secret: WH });
+  const r = await api.put('/api/payments/settings', { secret_key: SK, publishable_key: PK, webhook_secret: WH });
   assert.equal(r.status, 200, r.text);
   const webhookUrl = new URL(r.body.webhook_url).pathname;
   let slug = '';
@@ -155,23 +88,25 @@ async function click(f: Funnel, code: string, jar: Jar = {}): Promise<Jar> {
   return { ...jar, ...r.cookies };
 }
 
+/** The page's script sends the order form: order created, Stripe Elements gets its client secret. */
 async function startCheckout(f: Funnel, email: string, jar: Jar = {}) {
-  const r = await http(ctx, 'POST', `${f.order}/checkout`, { form: { _block: 'pay1', email }, cookies: jar });
-  assert.equal(r.status, 303, r.text);
-  const loc = r.headers.get('location') ?? '';
-  assert.match(loc, /^https:\/\/checkout\.stripe\.test\/pay\/cs_test_/);
-  return loc.split('/').pop()!;
+  const r = await http(ctx, 'POST', `${f.order}/checkout`, { json: { _block: 'pay1', email }, cookies: jar });
+  assert.equal(r.status, 200, r.text);
+  return { ...(r.body as { o: string; clientSecret: string; returnUrl: string }), oid: Number(String(r.body.o).split('.')[0]) };
 }
+const pathOf = (url: string) => {
+  const u = new URL(url);
+  return u.pathname + u.search;
+};
+const orderById = (id: number) => db.selectFrom('orders').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
 
-const orderBySession = (sid: string) => db.selectFrom('orders').selectAll().where('stripe_session_id', '=', sid).executeTakeFirstOrThrow();
-
-/** Order form → payment on the fake hosted page → return to the funnel. */
+/** Order form → payment confirmed in Stripe Elements → return to the funnel. */
 async function buy(f: Funnel, email: string, jar: Jar = {}) {
-  const sid = await startCheckout(f, email, jar);
-  stripe.pay(sid);
-  const back = await http(ctx, 'GET', `${f.order}/paid?session_id=${sid}`, { cookies: jar });
+  const s = await startCheckout(f, email, jar);
+  stripe.confirm(s.clientSecret);
+  const back = await http(ctx, 'GET', pathOf(s.returnUrl), { cookies: jar });
   assert.equal(back.status, 303, back.text);
-  return { sid, order: await orderBySession(sid), jar: { ...jar, ...back.cookies } };
+  return { ...s, order: await orderById(s.oid), jar: { ...jar, ...back.cookies } };
 }
 
 const commissionsOf = (orderId: number) => db.selectFrom('affiliate_commissions').selectAll().where('order_id', '=', orderId).orderBy('id').execute();
@@ -457,8 +392,7 @@ describe('commissions', () => {
     }
 
     // order paid with nothing collected: sale attributed, no commission
-    const sid = await startCheckout(f, 'gratuit@mail.fr', jar);
-    const pending = await orderBySession(sid);
+    const pending = await orderById((await startCheckout(f, 'gratuit@mail.fr', jar)).oid);
     await markOrderPaid(s.userId, pending.id, { amount: 0, transactionKey: 'free_1' });
     assert.deepEqual(await commissionsOf(pending.id), []);
 
@@ -481,15 +415,15 @@ describe('commissions', () => {
     const f = await funnel(s.api, p.prices[0].id);
     const a = await affiliate(s.api, 'emma@partenaires.fr');
     const jar = await click(f, a.code);
-    const sid = await startCheckout(f, 'rejeu@mail.fr', jar);
-    const session = stripe.pay(sid);
-    const order = await orderBySession(sid);
+    const started = await startCheckout(f, 'rejeu@mail.fr', jar);
+    const { pi } = stripe.confirm(started.clientSecret);
+    const order = await orderById(started.oid);
+    const event = { ...pi, metadata: { order_id: String(order.id) } };
 
-    assert.equal((await webhook(s.webhookUrl, 'checkout.session.completed', { id: sid }, 'evt_once')).body.result, 'processed');
-    assert.equal((await webhook(s.webhookUrl, 'checkout.session.completed', { id: sid }, 'evt_once')).body.result, 'duplicate');
-    assert.equal((await webhook(s.webhookUrl, 'checkout.session.completed', { id: sid })).body.result, 'processed');
-    await webhook(s.webhookUrl, 'payment_intent.succeeded', { ...(session.payment_intent as StripePaymentIntent) });
-    await http(ctx, 'GET', `${f.order}/paid?session_id=${sid}`, { cookies: jar });
+    assert.equal((await webhook(s.webhookUrl, 'payment_intent.succeeded', event, 'evt_once')).body.result, 'processed');
+    assert.equal((await webhook(s.webhookUrl, 'payment_intent.succeeded', event, 'evt_once')).body.result, 'duplicate');
+    assert.equal((await webhook(s.webhookUrl, 'payment_intent.succeeded', event)).body.result, 'processed');
+    await http(ctx, 'GET', pathOf(started.returnUrl), { cookies: jar });
     assert.deepEqual(summary(await commissionsOf(order.id)), [['sale', 3000, 'pending']]);
     assert.equal((await db.selectFrom('affiliate_referrals').select('id').where('order_id', '=', order.id).execute()).length, 1);
     assert.equal((await db.selectFrom('contact_events').select('id').where('contact_id', '=', a.contact_id).where('type', '=', 'affiliate_commission').execute()).length, 1);
@@ -525,14 +459,14 @@ describe('commissions', () => {
     const f = await funnel(s.api, sub.prices[0].id);
     const a = await affiliate(s.api, 'hugo@partenaires.fr');
     const jar = await click(f, a.code);
-    const { order, sid } = await buy(f, 'abonne@mail.fr', jar);
+    const { order } = await buy(f, 'abonne@mail.fr', jar);
     assert.deepEqual(summary(await commissionsOf(order.id)), [['sale', 900, 'pending']]);
-    const subId = (await orderBySession(sid)).stripe_subscription_id!;
+    const subId = order.stripe_subscription_id!;
     const invoice = (n: number) => ({ id: `in_renew_${order.id}_${n}`, amount_paid: 3000, currency: 'eur', subscription: subId, payment_intent: `pi_renew_${order.id}_${n}`, billing_reason: 'subscription_cycle' });
 
     // the first invoice is the payment already commissioned; each renewal earns once, replays included
-    const firstInvoice = stripe.sessions.get(sid)!.invoice as { id: string };
-    await webhook(s.webhookUrl, 'invoice.paid', { id: firstInvoice.id, amount_paid: 3000, currency: 'eur', subscription: subId, payment_intent: 'pi_first', billing_reason: 'subscription_create' });
+    const firstInvoice = stripe.subs.get(subId)!.latest_invoice as string;
+    await webhook(s.webhookUrl, 'invoice.paid', { id: firstInvoice, amount_paid: 3000, currency: 'eur', subscription: subId, payment_intent: 'pi_first', billing_reason: 'subscription_create' });
     await webhook(s.webhookUrl, 'invoice.paid', invoice(1));
     await webhook(s.webhookUrl, 'invoice.paid', invoice(1));
     assert.deepEqual(summary(await commissionsOf(order.id)), [['sale', 900, 'pending'], ['recurring', 900, 'pending']]);
@@ -549,7 +483,7 @@ describe('commissions', () => {
     await s.api.put('/api/affiliation/settings', { recurring: false, recurring_months: null });
     await webhook(s.webhookUrl, 'invoice.paid', invoice(4));
     assert.equal((await commissionsOf(order.id)).length, 3);
-    assert.equal((await orderBySession(sid)).amount_paid, 3000 * 5);
+    assert.equal((await orderById(order.id)).amount_paid, 3000 * 5);
 
     // affiliate suspended: renewals earn nothing either
     await s.api.put('/api/affiliation/settings', { recurring: true });
@@ -560,10 +494,10 @@ describe('commissions', () => {
 
     // installments are one sale paid in several times: every payment earns, even with recurring commissions off
     await s.api.put('/api/affiliation/settings', { recurring: false });
-    const plan = await product(s.api, { name: 'Formation x2', prices: [{ type: 'installments', amount: 5000, currency: 'eur', installments: 2 }] });
+    const plan = await product(s.api, { name: 'Formation x2', prices: [{ type: 'installments', amount: 10000, currency: 'eur', installments_min: 2, installments_max: 2 }] });
     const f2 = await funnel(s.api, plan.prices[0].id);
     const b2 = await buy(f2, 'x2@mail.fr', await click(f2, a.code));
-    const sub2 = (await orderBySession(b2.sid)).stripe_subscription_id!;
+    const sub2 = b2.order.stripe_subscription_id!;
     await webhook(s.webhookUrl, 'invoice.paid', { id: 'in_2nd_aff', amount_paid: 5000, currency: 'eur', subscription: sub2, payment_intent: 'pi_2nd_aff', billing_reason: 'subscription_cycle' });
     assert.deepEqual(summary(await commissionsOf(b2.order.id)), [['sale', 1500, 'pending'], ['recurring', 1500, 'pending']]);
   });

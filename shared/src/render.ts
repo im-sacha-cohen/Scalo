@@ -21,11 +21,16 @@ export interface RenderContext {
   settings: PageSettings;
   nextUrl?: string;     // target of "next step" buttons and form redirects
   formAction?: string;  // POST target of forms (page mode)
-  /** Payment blocks (page mode): POST targets, offers by price id (current name / price), message after a redirect. */
+  /**
+   * Payment blocks (page mode): POST targets, offers by price id (current name / price; installments: the plans the
+   * buyer chooses from), message after a redirect, and the Stripe publishable key when the order forms pay on the page
+   * (Stripe Elements; absent: the form is posted and the buyer pays on Scalo's payment page).
+   */
   checkoutAction?: string;
   upsellAction?: string;
-  offers?: Record<number, { name: string; price: string; description?: string }>;
+  offers?: Record<number, { name: string; price: string; description?: string; options?: PayOption[] }>;
   payNotice?: string;
+  stripeKey?: string;
   vars?: Record<string, string>; // merge tags: {{first_name}}, {{email}}...
   /** Absolute origin used to make root-relative image URLs absolute (emails). */
   baseUrl?: string;
@@ -35,6 +40,9 @@ export interface RenderContext {
   depth?: number;
   inColumn?: boolean;
 }
+
+/** One way to pay an installments offer, as shown to the buyer: « En 3 fois », « 3 × 100,00 € / mois », detail. */
+export interface PayOption { count: number; label: string; price: string; detail: string }
 
 export const MOBILE_BREAKPOINT = 640;
 const MAX_DEPTH = 6;

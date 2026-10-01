@@ -7,7 +7,7 @@ import { isAppHost } from '../services/domains';
 import { readFunnelSettings } from '../services/tracking';
 import { consentStep, notFoundPage, resolveIn, sendSimple, submitStep, unlockStep, viewStep, type FunnelRow } from './public';
 import { serveUpload } from './uploads';
-import { checkoutStep, paidStep, upsellStep } from './payments-public';
+import { checkoutStep, paidStep, payPage, payStep, upsellStep } from './payments-public';
 
 interface Served { funnel: FunnelRow; rootStepId: number | null }
 
@@ -61,11 +61,21 @@ domainRouter.post('/:stepSlug/consent', async (req, res) => {
   if (!r) return unknownHost(res);
   consentStep(req, res, r);
 });
-// payments: order form, return from Stripe Checkout, one-click offer (routes/payments-public.ts)
+// payments: order form, payment page, return after the payment, one-click offer (routes/payments-public.ts)
 domainRouter.post('/:stepSlug/checkout', async (req, res) => {
   const r = await resolveIn(served(res).funnel, String(req.params.stepSlug));
   if (!r) return unknownHost(res);
   await checkoutStep(req, res, r);
+});
+domainRouter.post('/:stepSlug/pay', async (req, res) => {
+  const r = await resolveIn(served(res).funnel, String(req.params.stepSlug));
+  if (!r) return res.status(404).json({ error: 'Page introuvable' });
+  await payStep(req, res, r);
+});
+domainRouter.get('/:stepSlug/pay', async (req, res) => {
+  const r = await resolveIn(served(res).funnel, String(req.params.stepSlug));
+  if (!r) return unknownHost(res);
+  await payPage(req, res, r);
 });
 domainRouter.get('/:stepSlug/paid', async (req, res) => {
   const r = await resolveIn(served(res).funnel, String(req.params.stepSlug));

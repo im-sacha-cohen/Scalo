@@ -9,6 +9,10 @@ import {
   DEFAULT_EMAIL_SETTINGS,
   flattenBlocks,
   formatMoney,
+  installmentOptions,
+  installmentPlan,
+  planDetail,
+  planLabel,
   priceLabel,
   STRIPE_WEBHOOK_EVENTS,
   uid as blockId,
@@ -19,6 +23,7 @@ import {
   type OrderItemKind,
   type PageContent,
   type PaymentSettings,
+  type PayOption,
   type SalesStats,
 } from '@scalo/shared';
 import { db, inTx, nowIso, type Db, type PaymentSettingsTable } from '../db';
@@ -76,6 +81,7 @@ export function publicPaymentSettings(r: PaymentSettingsRow): PaymentSettings {
     webhook_events: STRIPE_WEBHOOK_EVENTS,
     account_name: r.account_name,
     verified_at: r.verified_at,
+    sepa_debit: r.sepa_debit,
   };
 }
 
@@ -118,8 +124,11 @@ export interface Sellable {
   type: 'one_time' | 'subscription' | 'installments';
   amount: number;
   currency: string;
-  interval: 'month' | 'year' | null;
-  installments: number | null;
+  interval: 'week' | 'month' | 'year' | null;
+  interval_count: number;
+  installments_min: number | null;
+  installments_max: number | null;
+  installment_fees: Record<string, number>;
   tax_rate: number;
   tax_inclusive: boolean;
 }
@@ -132,7 +141,7 @@ export async function loadSellables(userId: number, priceIds?: number[], ex: Db 
     .innerJoin('products as p', 'p.id', 'pp.product_id')
     .select([
       'pp.id as price_id', 'p.id as product_id', 'p.name as product_name', 'p.description', 'p.image_url', 'p.tag_id', 'p.campaign_id', 'p.revoke_on_refund',
-      'pp.name as price_name', 'pp.type', 'pp.amount', 'pp.currency', 'pp.interval', 'pp.installments', 'pp.tax_rate', 'pp.tax_inclusive',
+      'pp.name as price_name', 'pp.type', 'pp.amount', 'pp.currency', 'pp.interval', 'pp.interval_count', 'pp.installments_min', 'pp.installments_max', 'pp.installment_fees', 'pp.tax_rate', 'pp.tax_inclusive',
     ])
     .where('pp.user_id', '=', userId)
     .where('p.user_id', '=', userId)
@@ -155,18 +164,28 @@ export function toOffer(s: Sellable): Offer {
     type: s.type,
     currency: s.currency as Offer['currency'],
     interval: s.interval,
-    installments: s.installments,
+    interval_count: s.interval_count,
     amount_total: a.total,
     amount_tax: a.tax,
     tax_rate: s.tax_rate,
     price_label: priceLabel(s, a.total),
+    options: s.type === 'installments' ? installmentOptions(s) : [],
   };
+}
+
+/** Number of payments actually used for an installments offer: the buyer's choice when it is allowed, else the smallest. */
+export function chosenInstallments(s: Sellable, wanted: unknown): number | null {
+  if (s.type !== 'installments') return null;
+  const min = s.installments_min ?? 2;
+  const max = s.installments_max ?? min;
+  const n = Number(wanted);
+  return Number.isInteger(n) && n >= min && n <= max ? n : min;
 }
 
 // ---------- public pages ----------
 
-/** Messages shown in the payment blocks after a redirect (`?pay=<code>`). */
-const NOTICES: Record<string, string> = {
+/** Messages shown in the payment blocks (after a redirect: `?pay=<code>`; JSON answers of the order form). */
+export const PAY_NOTICES: Record<string, string> = {
   cancel: 'Paiement annulé : vous n’avez pas été débité. Vous pouvez réessayer.',
   error: 'Le paiement n’a pas pu être lancé. Merci de réessayer dans un instant.',
   email: 'Adresse email invalide. Merci de vérifier et de réessayer.',
@@ -174,11 +193,40 @@ const NOTICES: Record<string, string> = {
   expired: 'Cette offre n’est plus disponible.',
   preview: 'Le paiement est désactivé en mode aperçu : ouvrez la page publique pour tester.',
   limit: 'Trop de tentatives. Réessayez dans quelques minutes.',
+  failed: 'Le paiement n’a pas abouti. Vous pouvez réessayer avec un autre moyen de paiement.',
 };
 
+/** What the renderer shows for an offer: name, price and — installments — the plans the buyer chooses from. */
+export interface ShownOffer {
+  name: string;
+  price: string;
+  description?: string;
+  options?: PayOption[];
+}
+
+export function shownOffer(s: Sellable): ShownOffer {
+  const o = toOffer(s);
+  return {
+    name: itemLabel(s),
+    price: o.price_label,
+    description: s.description,
+    ...(o.options.length
+      ? {
+          options: o.options.map((p) => ({
+            count: p.count,
+            label: p.count === 1 ? 'En une fois' : `En ${p.count} fois`,
+            price: planLabel(p, s.currency, s.interval, s.interval_count),
+            detail: p.count === 1 ? '' : planDetail(p, s.currency, s.interval, s.interval_count),
+          })),
+        }
+      : {}),
+  };
+}
+
 /**
- * What the renderer needs for the payment blocks of a page (none → `{}`): form targets, and the offers referenced by the
- * blocks with their current name and price (an unknown / inactive offer renders as « offre indisponible »).
+ * What the renderer needs for the payment blocks of a page (none → `{}`): form targets, the offers referenced by the
+ * blocks with their current name and price (an unknown / inactive offer renders as « offre indisponible »), and the
+ * Stripe publishable key the order forms pay with (Stripe Elements, on the page itself).
  */
 export async function paymentRenderContext(userId: number, content: PageContent, stepUrl: string, qs: string, payCode: unknown) {
   const blocks = flattenBlocks(content?.blocks ?? []).filter((b) => b.type === 'checkout' || b.type === 'upsell');
@@ -188,13 +236,17 @@ export async function paymentRenderContext(userId: number, content: PageContent,
     if (b.type !== 'checkout' && b.type !== 'upsell') continue;
     for (const id of [b.offerId, b.type === 'checkout' ? b.bumpOfferId : undefined]) if (Number.isSafeInteger(id) && Number(id) > 0) ids.add(Number(id));
   }
-  const offers: Record<number, { name: string; price: string; description?: string }> = {};
-  for (const s of await loadSellables(userId, [...ids])) {
-    const o = toOffer(s);
-    offers[o.id] = { name: itemLabel(s), price: o.price_label, description: s.description };
-  }
+  const offers: Record<number, ShownOffer> = {};
+  for (const s of await loadSellables(userId, [...ids])) offers[s.price_id] = shownOffer(s);
   const code = typeof payCode === 'string' ? payCode : '';
-  return { checkoutAction: `${stepUrl}/checkout${qs}`, upsellAction: `${stepUrl}/upsell${qs}`, offers, payNotice: NOTICES[code] };
+  const settings = await db.selectFrom('payment_settings').select(['stripe_publishable_key', 'stripe_secret_key']).where('user_id', '=', userId).executeTakeFirst();
+  return {
+    checkoutAction: `${stepUrl}/checkout${qs}`,
+    upsellAction: `${stepUrl}/upsell${qs}`,
+    offers,
+    payNotice: PAY_NOTICES[code],
+    stripeKey: settings?.stripe_secret_key ? settings.stripe_publishable_key ?? undefined : undefined,
+  };
 }
 
 // ---------- orders ----------
@@ -210,7 +262,8 @@ export interface NewOrder {
   parentOrderId?: number | null;
   kind: 'checkout' | 'upsell';
   livemode: boolean;
-  lines: { sellable: Sellable; kind: OrderItemKind }[];
+  /** `installments`: number of payments chosen by the buyer for an installments offer (see `chosenInstallments`). */
+  lines: { sellable: Sellable; kind: OrderItemKind; installments?: number | null }[];
   attribution?: Record<string, string> | null;
   visitor?: Record<string, unknown>;
   /** Known Stripe customer / saved card (upsells reuse the ones of the parent order). */
@@ -220,12 +273,25 @@ export interface NewOrder {
 
 const cleanName = (v: string | null | undefined) => v?.trim().slice(0, 200) || null;
 
+/** Order line of an offer: an installments offer paid in one go becomes a one-time line (at the price for 1 payment). */
+function lineOf(s: Sellable, wanted: number | null | undefined) {
+  const count = chosenInstallments(s, wanted);
+  if (count === null) return { type: s.type, installments: null, installment_amount: null, amounts: computeAmounts(s.amount, s.tax_rate, s.tax_inclusive) };
+  const plan = installmentPlan(s, count);
+  return {
+    type: count === 1 ? ('one_time' as const) : ('installments' as const),
+    installments: count === 1 ? null : count,
+    installment_amount: count === 1 ? null : plan.each,
+    amounts: { subtotal: plan.subtotal, tax: plan.tax, total: plan.total },
+  };
+}
+
 /** Creates a pending order. Amounts always come from the offers stored in the database, never from the request. */
 export function createOrder(o: NewOrder, ex: Db = db): Promise<{ order: OrderRow; items: OrderItemRow[] }> {
   return inTx(ex, async (trx) => {
     if (!o.lines.length) throw new Error('Commande sans ligne');
     const currency = o.lines[0].sellable.currency;
-    const lines = o.lines.filter((l) => l.sellable.currency === currency).map((l) => ({ ...l, amounts: computeAmounts(l.sellable.amount, l.sellable.tax_rate, l.sellable.tax_inclusive) }));
+    const lines = o.lines.filter((l) => l.sellable.currency === currency).map((l) => ({ ...l, ...lineOf(l.sellable, l.installments) }));
     const sum = (k: 'subtotal' | 'tax' | 'total') => lines.reduce((n, l) => n + l.amounts[k], 0);
     const now = nowIso();
     const order = await trx
@@ -264,9 +330,11 @@ export function createOrder(o: NewOrder, ex: Db = db): Promise<{ order: OrderRow
           kind: l.kind,
           product_name: l.sellable.product_name,
           price_name: l.sellable.price_name,
-          type: l.sellable.type,
-          interval: l.sellable.interval,
-          installments: l.sellable.installments,
+          type: l.type,
+          interval: l.type === 'one_time' ? null : l.sellable.interval,
+          interval_count: l.type === 'one_time' ? 1 : l.sellable.interval_count,
+          installments: l.installments,
+          installment_amount: l.installment_amount,
           tax_rate: l.sellable.tax_rate,
           tax_inclusive: l.sellable.tax_inclusive,
           amount_subtotal: l.amounts.subtotal,
@@ -469,7 +537,7 @@ async function orderOfSubscription(trx: Db, userId: number, subscriptionId: stri
  * recorded as payments (`subscription_payment` hooks). Returns the subscription to cancel when the last installment
  * has just been paid (the caller cancels it at Stripe once the transaction is committed).
  */
-export function recordInvoicePaid(userId: number, inv: StripeInvoice, ex: Db = db): Promise<{ orderId: number; cancelSubscription: string | null } | null> {
+export function recordInvoicePaid(userId: number, inv: StripeInvoice, ex: Db = db, paymentMethodId?: string | null): Promise<{ orderId: number; cancelSubscription: string | null } | null> {
   return inTx(ex, async (trx) => {
     if (!inv.subscription) return null;
     const orderId = await orderOfSubscription(trx, userId, inv.subscription, inv.subscription_details?.metadata?.order_id ?? inv.lines?.data?.[0]?.metadata?.order_id);
@@ -479,7 +547,7 @@ export function recordInvoicePaid(userId: number, inv: StripeInvoice, ex: Db = d
     const items = await itemsOf(trx, cur.id);
     if (!items.some((i) => i.type !== 'one_time')) return null;
     if (cur.status !== 'paid' && cur.status !== 'refunded') {
-      await markOrderPaid(userId, cur.id, { amount: inv.amount_paid, transactionKey: inv.id, paymentIntentId: inv.payment_intent, customerId: inv.customer, subscriptionId: inv.subscription }, trx);
+      await markOrderPaid(userId, cur.id, { amount: inv.amount_paid, transactionKey: inv.id, paymentIntentId: inv.payment_intent, customerId: inv.customer, subscriptionId: inv.subscription, paymentMethodId }, trx);
     } else {
       const now = nowIso();
       const tx = await trx
@@ -528,7 +596,11 @@ export function endSubscription(userId: number, subscriptionId: string, metadata
     const orderId = await orderOfSubscription(trx, userId, subscriptionId, metadataOrderId);
     const cur = orderId ? await lockOrder(trx, userId, orderId) : undefined;
     if (!cur || cur.subscription_status === 'canceled' || cur.subscription_status === 'completed') return cur ?? null;
-    if (cur.status !== 'paid' && cur.status !== 'refunded') return cur; // never paid: nothing was granted
+    if (cur.status !== 'paid' && cur.status !== 'refunded') {
+      // never paid: nothing was granted. The first payment of its current subscription was abandoned → the order is too
+      if (cur.stripe_subscription_id === subscriptionId) await markOrderUnpaid(userId, cur.id, 'canceled', 'Paiement abandonné', trx);
+      return cur;
+    }
     const items = await itemsOf(trx, cur.id);
     const planned = installmentsOf(items);
     const completed = planned !== null && (await paymentsCount(trx, cur.id)) >= planned;
@@ -705,7 +777,7 @@ async function queueOrderEmail(trx: Db, order: OrderRow, items: OrderItemRow[], 
       id: blockId(),
       type: 'list',
       icon: 'check',
-      items: items.map((i) => `${itemLabel(i)} : ${priceLabel({ type: i.type, interval: i.interval as 'month' | 'year' | null, installments: i.installments, currency: order.currency }, i.amount_total)}`),
+      items: items.map((i) => `${itemLabel(i)} : ${priceLabel({ ...i, interval: i.interval as OrderItem['interval'], currency: order.currency }, i.amount_total)}`),
     } as Block,
     text(`**Montant payé : ${formatMoney(order.amount_paid || order.amount_total, order.currency)}**${order.amount_tax ? ` (dont TVA ${formatMoney(order.amount_tax, order.currency)})` : ''}`),
     text('Conservez cet email : il fait office de confirmation de commande. Pour toute question, répondez simplement à ce message.', { color: '#64748b', fontSize: 13 }),
@@ -732,7 +804,9 @@ export const toOrderItem = (i: OrderItemRow): OrderItem => ({
   price_name: i.price_name,
   type: i.type,
   interval: i.interval as OrderItem['interval'],
+  interval_count: i.interval_count,
   installments: i.installments,
+  installment_amount: i.installment_amount,
   tax_rate: Number(i.tax_rate),
   tax_inclusive: i.tax_inclusive,
   amount_subtotal: i.amount_subtotal,

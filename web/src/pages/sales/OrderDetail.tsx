@@ -104,7 +104,8 @@ export function OrderDetailPage() {
                       {i.tax_rate > 0 && <span className="block text-xs text-slate-500">TVA {String(i.tax_rate).replace('.', ',')} % : {money(i.amount_tax, o.currency)}</span>}
                     </td>
                     <td className="px-5 py-3 text-right font-semibold whitespace-nowrap text-slate-900 tabular-nums">
-                      {priceLabel({ type: i.type, interval: i.interval, installments: i.installments, currency: o.currency }, i.amount_total)}
+                      {priceLabel({ ...i, currency: o.currency }, i.amount_total)}
+                      {i.type === 'installments' && i.installments && <span className="block text-xs font-normal text-slate-500">total {money(i.amount_total, o.currency)}</span>}
                     </td>
                   </tr>
                 ))}

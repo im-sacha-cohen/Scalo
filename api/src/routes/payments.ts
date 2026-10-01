@@ -3,7 +3,7 @@
 import { Router } from 'express';
 import { sql } from 'kysely';
 import { z } from 'zod';
-import { CURRENCIES, type Product, type ProductPrice } from '@scalo/shared';
+import { CURRENCIES, INSTALLMENT_RHYTHMS, installmentPlan, MAX_INSTALLMENTS, type Product, type ProductPrice } from '@scalo/shared';
 import { db, nowIso, type Db } from '../db';
 import { getContactRow, getOrCreateTag } from '../services/contacts';
 import {
@@ -38,6 +38,7 @@ const settingsSchema = z.object({
   secret_key: z.string().trim().max(300).optional(),
   publishable_key: z.string().trim().max(300).nullable().optional(),
   webhook_secret: z.string().trim().max(300).nullable().optional(),
+  sepa_debit: z.boolean().optional(),
 });
 
 /** Empty / missing secret = unchanged (secrets are write-only). `null` clears the publishable key / webhook secret. */
@@ -51,7 +52,7 @@ paymentsRouter.put('/payments/settings', async (req, res) => {
     if (!SECRET_KEY_RE.test(body.secret_key)) throw new HttpError(400, 'Clé secrète invalide : elle commence par sk_test_, sk_live_, rk_test_ ou rk_live_');
     const enc = encryptStripeKey(body.secret_key);
     mode = keyMode(body.secret_key);
-    Object.assign(set, { stripe_secret_key: enc.value, stripe_secret_hint: enc.hint, mode, account_name: null, verified_at: null });
+    Object.assign(set, { stripe_secret_key: enc.value, stripe_secret_hint: enc.hint, mode, account_name: null, verified_at: null, payment_domains: '[]' });
   }
   if (body.publishable_key !== undefined) {
     const pk = body.publishable_key || null;
@@ -69,6 +70,7 @@ paymentsRouter.put('/payments/settings', async (req, res) => {
       Object.assign(set, { stripe_webhook_secret: enc.value, stripe_webhook_hint: enc.hint });
     }
   }
+  if (body.sepa_debit !== undefined) set.sepa_debit = body.sepa_debit;
   if (Object.keys(set).length) await db.updateTable('payment_settings').set({ ...set, updated_at: nowIso() }).where('user_id', '=', userId).execute();
   res.json(publicPaymentSettings(await getPaymentSettingsRow(userId)));
 });
@@ -94,7 +96,7 @@ paymentsRouter.delete('/payments/settings', async (req, res) => {
     .updateTable('payment_settings')
     .set({
       stripe_secret_key: null, stripe_secret_hint: null, stripe_publishable_key: null, stripe_webhook_secret: null, stripe_webhook_hint: null,
-      mode: null, account_name: null, verified_at: null, updated_at: nowIso(),
+      mode: null, account_name: null, verified_at: null, payment_domains: '[]', updated_at: nowIso(),
     })
     .where('user_id', '=', userId)
     .execute();
@@ -108,25 +110,55 @@ const priceSchema = z
     id: z.number().int().positive().optional(),
     name: z.string().trim().max(120).optional().default(''),
     type: z.enum(['one_time', 'subscription', 'installments']),
+    /** One-time / installments: price paid in one go. Subscription: price per period. */
     amount: z.number().int('Montant en centimes (entier)').min(50, 'Montant minimum : 0,50').max(99_999_999),
     currency: z.enum(CURRENCIES),
-    interval: z.enum(['month', 'year']).nullable().optional(),
-    installments: z.number().int().min(2).max(36).nullable().optional(),
+    interval: z.enum(['week', 'month', 'year']).nullable().optional(),
+    interval_count: z.number().int().min(1).max(12).optional(),
+    installments_min: z.number().int().min(1).max(MAX_INSTALLMENTS).nullable().optional(),
+    installments_max: z.number().int().min(2).max(MAX_INSTALLMENTS).nullable().optional(),
+    /** Surcharge in percent per number of payments. */
+    installment_fees: z.record(z.string().regex(/^\d{1,2}$/), z.number().min(0).max(100)).optional(),
     tax_rate: z.number().min(0).max(100).optional().default(0),
     tax_inclusive: z.boolean().optional().default(true),
     active: z.boolean().optional().default(true),
   })
   .transform((p, ctx) => {
-    if (p.type === 'installments' && !p.installments) {
-      ctx.addIssue({ code: 'custom', path: ['installments'], message: 'Indiquez le nombre d’échéances (2 à 36)' });
+    const base = { ...p, tax_rate: Math.round(p.tax_rate * 100) / 100 };
+    if (p.type !== 'installments') {
+      return {
+        ...base,
+        interval: p.type === 'one_time' ? null : p.interval === 'year' ? ('year' as const) : ('month' as const),
+        interval_count: 1,
+        installments_min: null,
+        installments_max: null,
+        installment_fees: '{}',
+      };
+    }
+    const max = p.installments_max ?? null;
+    const min = p.installments_min ?? max;
+    if (!max || !min) {
+      ctx.addIssue({ code: 'custom', path: ['installments_max'], message: `Indiquez le nombre maximum d’échéances (2 à ${MAX_INSTALLMENTS})` });
       return z.NEVER;
     }
-    return {
-      ...p,
-      tax_rate: Math.round(p.tax_rate * 100) / 100,
-      interval: p.type === 'one_time' ? null : p.type === 'installments' ? ('month' as const) : p.interval ?? ('month' as const),
-      installments: p.type === 'installments' ? p.installments! : null,
-    };
+    if (min > max) {
+      ctx.addIssue({ code: 'custom', path: ['installments_min'], message: 'Le minimum d’échéances dépasse le maximum' });
+      return z.NEVER;
+    }
+    const rhythm = INSTALLMENT_RHYTHMS.find((r) => r.interval === (p.interval ?? 'month') && r.count === (p.interval_count ?? 1));
+    if (!rhythm) {
+      ctx.addIssue({ code: 'custom', path: ['interval'], message: 'Rythme des échéances : chaque mois, toutes les 2 semaines ou chaque semaine' });
+      return z.NEVER;
+    }
+    // surcharges only for the counts on offer, rounded to 2 decimals
+    const fees: Record<string, number> = {};
+    for (const [k, v] of Object.entries(p.installment_fees ?? {})) if (Number(k) >= Math.max(2, min) && Number(k) <= max && v > 0) fees[k] = Math.round(v * 100) / 100;
+    const each = installmentPlan({ amount: p.amount, tax_rate: base.tax_rate, tax_inclusive: p.tax_inclusive, installment_fees: fees }, max).each;
+    if (each < 50) {
+      ctx.addIssue({ code: 'custom', path: ['installments_max'], message: `Échéance trop faible en ${max} fois (0,50 minimum) : réduisez le nombre d’échéances` });
+      return z.NEVER;
+    }
+    return { ...base, interval: rhythm.interval, interval_count: rhythm.count, installments_min: min, installments_max: max, installment_fees: JSON.stringify(fees) };
   });
 
 const imageUrl = z
@@ -180,7 +212,7 @@ export async function listProducts(userId: number, opts: { id?: number; archived
     sales_count: Number(r.sales_count ?? 0),
     prices: prices
       .filter((p) => p.product_id === r.id)
-      .map(({ user_id: _u, ...p }): ProductPrice => ({ ...p, currency: p.currency as ProductPrice['currency'], tax_rate: Number(p.tax_rate) })),
+      .map(({ user_id: _u, ...p }): ProductPrice => ({ ...p, currency: p.currency as ProductPrice['currency'], tax_rate: Number(p.tax_rate), installment_fees: p.installment_fees ?? {} })),
   }));
 }
 

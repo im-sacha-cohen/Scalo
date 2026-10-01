@@ -22,6 +22,7 @@ import { CampaignDetailPage } from './pages/emails/CampaignDetail';
 import { SettingsPage } from './pages/SettingsPage';
 import { SalesPage } from './pages/sales/SalesPage';
 import { OrderDetailPage } from './pages/sales/OrderDetail';
+import { ProductEditorPage } from './pages/sales/ProductEditor';
 import { AffiliationPage } from './pages/affiliates/AffiliationPage';
 import { NotFoundPage } from './pages/NotFound';
 import { ConsentPage } from './pages/oauth/ConsentPage';
@@ -104,6 +105,8 @@ const router = createBrowserRouter([
           { path: '/emails/campaigns/:id', element: <CampaignDetailPage /> },
           { path: '/sales', element: <SalesPage /> },
           { path: '/sales/orders/:id', element: <OrderDetailPage /> },
+          { path: '/sales/products/new', element: <ProductEditorPage /> },
+          { path: '/sales/products/:id', element: <ProductEditorPage /> },
           { path: '/affiliation', element: <AffiliationPage /> },
           { path: '/settings', element: <SettingsPage /> },
           { path: '/developers', element: <DevelopersPage /> },

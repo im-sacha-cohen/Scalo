@@ -9,10 +9,21 @@ export const isCurrency = (c: unknown): c is Currency => typeof c === 'string' &
 /**
  * - one_time:     a single payment
  * - subscription: charged every `interval` until cancelled
- * - installments: `installments` monthly payments of `amount`, then the subscription ends by itself
+ * - installments: `amount` is the price paid in one go; the buyer chooses to pay it in `installments_min` to
+ *                 `installments_max` times (1 = in one go), every `interval_count` × `interval`, with an optional
+ *                 surcharge per number of installments. The plan ends by itself after the last installment.
  */
 export type PriceType = 'one_time' | 'subscription' | 'installments';
-export type PriceInterval = 'month' | 'year';
+/** Subscriptions: month / year. Installments: week / month (× `interval_count`). */
+export type PriceInterval = 'week' | 'month' | 'year';
+
+/** Rhythms offered for installments. */
+export const INSTALLMENT_RHYTHMS = [
+  { id: 'month', interval: 'month', count: 1, label: 'Chaque mois' },
+  { id: '2week', interval: 'week', count: 2, label: 'Toutes les 2 semaines' },
+  { id: 'week', interval: 'week', count: 1, label: 'Chaque semaine' },
+] as const;
+export const MAX_INSTALLMENTS = 36;
 
 /** An offer of a product ("prix"). `amount` is tax included when `tax_inclusive`, tax excluded otherwise. */
 export interface ProductPrice {
@@ -24,7 +35,13 @@ export interface ProductPrice {
   amount: number;
   currency: Currency;
   interval: PriceInterval | null;
-  installments: number | null;
+  /** Every `interval_count` × `interval` (installments: 1 or 2 weeks, 1 month). */
+  interval_count: number;
+  /** Installments: the buyer chooses between these two numbers of payments (min 1 = may also pay in one go). */
+  installments_min: number | null;
+  installments_max: number | null;
+  /** Installments: surcharge in percent per number of payments (`{ "3": 5 }` = +5 % in 3 times). */
+  installment_fees: Record<string, number>;
   /** VAT rate in percent (0–100, 2 decimals). */
   tax_rate: number;
   tax_inclusive: boolean;
@@ -64,13 +81,31 @@ export interface Offer {
   type: PriceType;
   currency: Currency;
   interval: PriceInterval | null;
-  installments: number | null;
-  /** Charged per payment, tax included. */
+  interval_count: number;
+  /** Price in one go (installments: without surcharge), or per period (subscriptions), tax included. */
   amount_total: number;
   amount_tax: number;
   tax_rate: number;
-  /** « 97,00 € », « 29,00 € / mois », « 3 × 99,00 € » */
+  /** « 97,00 € », « 29,00 € / mois », « 297,00 € ou jusqu’à 3 × 99,00 € / mois » */
   price_label: string;
+  /** Installments: the plans the buyer chooses from (fewest payments first). Empty otherwise. */
+  options: InstallmentOption[];
+}
+
+/** One way to pay an installments offer. Amounts tax included, in minor units. */
+export interface InstallmentOption {
+  /** Number of payments (1 = in one go). */
+  count: number;
+  /** Whole plan (surcharge included). */
+  total: number;
+  subtotal: number;
+  tax: number;
+  /** Charged today: the regular installment plus the rounding cents. */
+  first: number;
+  /** Each following installment. */
+  each: number;
+  /** Surcharge applied, in percent. */
+  fee: number;
 }
 
 export type OrderStatus = 'pending' | 'paid' | 'failed' | 'refunded' | 'canceled';
@@ -88,9 +123,13 @@ export interface OrderItem {
   price_name: string;
   type: PriceType;
   interval: PriceInterval | null;
+  interval_count: number;
+  /** Installments: number of payments chosen, and each regular payment (the first one also takes the rounding cents). */
   installments: number | null;
+  installment_amount: number | null;
   tax_rate: number;
   tax_inclusive: boolean;
+  /** Whole line, tax included: one-time price, one subscription period, or the whole installment plan. */
   amount_subtotal: number;
   amount_tax: number;
   amount_total: number;
@@ -125,7 +164,7 @@ export interface Order {
   step_name?: string | null;
   parent_order_id: number | null;
   currency: string;
-  /** First payment (one-time total, or first period of a subscription), tax included. */
+  /** Sum of the lines (one-time prices, first subscription period, whole installment plans), tax included. */
   amount_subtotal: number;
   amount_tax: number;
   amount_total: number;
@@ -173,6 +212,8 @@ export interface PaymentSettings {
   webhook_events: string[];
   account_name: string | null;
   verified_at: string | null;
+  /** SEPA Direct Debit offered next to cards (EUR offers; must be activated in the Stripe dashboard). */
+  sepa_debit: boolean;
 }
 
 export interface SalesStats {
@@ -228,9 +269,84 @@ export function formatMoney(minor: number, currency: string): string {
   return `${n < 0 ? '-' : ''}${units},${cents} ${SYMBOLS[String(currency).toLowerCase()] ?? String(currency).toUpperCase()}`;
 }
 
-export function priceLabel(p: { type: PriceType; interval: PriceInterval | null; installments: number | null; currency: string }, total: number): string {
+/** « mois », « semaine », « 2 semaines », « an » */
+export function intervalLabel(interval: PriceInterval | string | null, count = 1): string {
+  const one = interval === 'year' ? 'an' : interval === 'week' ? 'semaine' : 'mois';
+  if (count <= 1) return one;
+  return `${count} ${interval === 'year' ? 'ans' : interval === 'week' ? 'semaines' : 'mois'}`;
+}
+
+type Plannable = { amount: number; tax_rate: number; tax_inclusive: boolean; installment_fees?: Record<string, number> | null };
+
+/** Surcharge (percent) for `count` payments. */
+export const installmentFee = (p: Pick<Plannable, 'installment_fees'>, count: number) => {
+  const v = Number(p.installment_fees?.[String(count)]);
+  return count > 1 && Number.isFinite(v) && v > 0 ? Math.min(100, Math.round(v * 100) / 100) : 0;
+};
+
+/** Plan for `count` payments: surcharge, tax, then the total split in equal installments, the first one taking the rounding cents. */
+export function installmentPlan(p: Plannable, count: number): InstallmentOption {
+  const n = Math.max(1, Math.min(MAX_INSTALLMENTS, Math.round(count)));
+  const fee = installmentFee(p, n);
+  const a = computeAmounts(Math.round(p.amount * (1 + fee / 100)), p.tax_rate, p.tax_inclusive);
+  const each = Math.floor(a.total / n);
+  return { count: n, total: a.total, subtotal: a.subtotal, tax: a.tax, first: a.total - each * (n - 1), each, fee };
+}
+
+/** Every plan of an installments offer, fewest payments first. */
+export function installmentOptions(p: Plannable & { installments_min: number | null; installments_max: number | null }): InstallmentOption[] {
+  const min = Math.max(1, p.installments_min ?? 2);
+  const max = Math.max(min, Math.min(MAX_INSTALLMENTS, p.installments_max ?? min));
+  return Array.from({ length: max - min + 1 }, (_, i) => installmentPlan(p, min + i));
+}
+
+/** « 3 × 100,00 € / mois » (the first installment may be a few cents more: see `planDetail`). */
+export function planLabel(o: Pick<InstallmentOption, 'count' | 'each' | 'total'>, currency: string, interval: PriceInterval | string | null, intervalCount = 1): string {
+  if (o.count <= 1) return formatMoney(o.total, currency);
+  return `${o.count} × ${formatMoney(o.each, currency)} / ${intervalLabel(interval, intervalCount)}`;
+}
+
+/** « 100,01 € aujourd’hui, puis 2 × 100,00 € tous les mois · total 300,01 € » */
+export function planDetail(o: InstallmentOption, currency: string, interval: PriceInterval | string | null, intervalCount = 1): string {
+  if (o.count <= 1) return `${formatMoney(o.total, currency)} en une fois`;
+  const every = interval === 'week' ? (intervalCount > 1 ? `toutes les ${intervalCount} semaines` : 'chaque semaine') : intervalCount > 1 ? `tous les ${intervalCount} mois` : 'chaque mois';
+  return `${formatMoney(o.first, currency)} aujourd’hui, puis ${o.count - 1} × ${formatMoney(o.each, currency)} ${every} · total ${formatMoney(o.total, currency)}`;
+}
+
+/**
+ * Label of a price. Installments offers: « 297,00 € ou jusqu’à 3 × 99,00 € / mois » (`total`: price in one go), or
+ * one plan when `installments` is given (order lines: « 3 × 99,00 € / mois », `total`: the whole plan).
+ */
+export function priceLabel(
+  p: {
+    type: PriceType;
+    interval: PriceInterval | null;
+    interval_count?: number | null;
+    currency: string;
+    installments?: number | null;
+    installment_amount?: number | null;
+    installments_min?: number | null;
+    installments_max?: number | null;
+    amount?: number;
+    tax_rate?: number;
+    tax_inclusive?: boolean;
+    installment_fees?: Record<string, number> | null;
+  },
+  total: number,
+): string {
   const m = formatMoney(total, p.currency);
-  if (p.type === 'subscription') return `${m} / ${p.interval === 'year' ? 'an' : 'mois'}`;
-  if (p.type === 'installments') return `${p.installments ?? 2} × ${m}`;
-  return m;
+  const every = intervalLabel(p.interval, p.interval_count ?? 1);
+  if (p.type === 'subscription') return `${m} / ${every}`;
+  if (p.type !== 'installments') return m;
+  if (p.installments) {
+    const each = p.installment_amount ?? Math.floor(total / p.installments);
+    return `${p.installments} × ${formatMoney(each, p.currency)} / ${every}`;
+  }
+  const max = p.installments_max ?? 2;
+  const min = p.installments_min ?? max;
+  const last = p.amount !== undefined ? installmentPlan({ amount: p.amount, tax_rate: p.tax_rate ?? 0, tax_inclusive: p.tax_inclusive ?? true, installment_fees: p.installment_fees }, max) : null;
+  const each = last ? formatMoney(last.each, p.currency) : '';
+  if (min === max) return last ? `${max} × ${each} / ${every}` : `${max} × ${m}`;
+  if (min === 1) return `${m} ou jusqu’à ${max} × ${each} / ${every}`;
+  return `de ${min} à ${max} fois (${m})`;
 }

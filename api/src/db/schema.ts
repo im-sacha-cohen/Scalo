@@ -449,8 +449,21 @@ export interface PaymentSettingsTable {
   webhook_token: string;
   account_name: string | null;
   verified_at: NullableTimestamp;
+  /** SEPA Direct Debit offered next to cards (0015; must be activated in the Stripe dashboard). */
+  sepa_debit: Default<boolean>;
+  /** Hosts already registered as Stripe payment method domains (Apple Pay / Google Pay), reset with the keys. */
+  payment_domains: JsonDefault<string[]>;
   created_at: Timestamp;
   updated_at: Timestamp;
+}
+
+/** Stripe Product of a Scalo product, per mode (subscriptions need a product id). */
+export interface StripeProductsTable {
+  user_id: number;
+  product_id: number;
+  livemode: boolean;
+  stripe_product_id: string;
+  created_at: Timestamp;
 }
 
 export interface ProductsTable {
@@ -476,8 +489,13 @@ export interface ProductPricesTable {
   type: 'one_time' | 'subscription' | 'installments';
   amount: number;
   currency: string;
-  interval: 'month' | 'year' | null;
-  installments: number | null;
+  interval: 'week' | 'month' | 'year' | null;
+  interval_count: Default<number>;
+  /** Installments offers: range the buyer chooses from (1 = may pay in one go). */
+  installments_min: number | null;
+  installments_max: number | null;
+  /** Surcharge in percent per number of installments: `{ "3": 5 }`. */
+  installment_fees: JsonDefault<Record<string, number>>;
   tax_rate: Default<number>;
   tax_inclusive: Default<boolean>;
   active: Default<boolean>;
@@ -530,7 +548,10 @@ export interface OrderItemsTable {
   price_name: Default<string>;
   type: 'one_time' | 'subscription' | 'installments';
   interval: string | null;
+  interval_count: Default<number>;
+  /** Installments: number chosen by the buyer, and the regular installment (tax included). `amount_*` = whole plan. */
   installments: number | null;
+  installment_amount: number | null;
   tax_rate: Default<number>;
   tax_inclusive: Default<boolean>;
   amount_subtotal: number;
@@ -934,6 +955,7 @@ export interface Database {
   order_items: OrderItemsTable;
   order_transactions: OrderTransactionsTable;
   stripe_events: StripeEventsTable;
+  stripe_products: StripeProductsTable;
   member_areas: MemberAreasTable;
   courses: CoursesTable;
   course_modules: CourseModulesTable;

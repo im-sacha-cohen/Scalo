@@ -1,9 +1,11 @@
-// Public side of the payments: order form of a funnel step (« Paiement » block → Stripe Checkout), return from Stripe,
-// one-click upsell (« Offre en un clic » block), and the Stripe webhook of each account.
+// Public side of the payments: order form of a funnel step (« Paiement » block), Scalo's payment page, return after
+// the payment, one-click upsell (« Offre en un clic » block), and the Stripe webhook of each account.
 //
-// No card data goes through Scalo: the buyer pays on Stripe's hosted page (SCA / 3-D Secure handled by Stripe) and the
-// card is saved there for the one-click offers of the next steps (`off_session` charge, with a fallback to the hosted
-// page when the bank asks for authentication or refuses the card). Amounts always come from the offers in the database.
+// The buyer pays on the funnel's own page with Stripe Elements (card, Apple Pay / Google Pay, SEPA Direct Debit;
+// 3-D Secure in Stripe's modal): no card data goes through Scalo and the buyer never sees a Stripe page. When the
+// funnel page cannot run Stripe.js (sandboxed custom code, no JavaScript) or a one-click offer needs the buyer, the
+// buyer is sent to Scalo's payment page for the order (`/pay?o=`), which does the same. The payment method is saved
+// for the one-click offers of the next steps (`off_session` charge). Amounts always come from the offers in the database.
 import { Router, type Request, type Response } from 'express';
 import { sql } from 'kysely';
 import { z } from 'zod';
@@ -12,8 +14,12 @@ import { db, nowIso } from '../db';
 import { submitArm } from '../services/ab';
 import { submitAttribution } from '../services/attribution';
 import { VISITOR_COOKIE_RE } from '../services/order-hooks';
+import { formatMoney, planDetail, priceLabel, type InstallmentOption } from '@scalo/shared';
+import { chargeSubscriptionOffSession, dueNow, orderOfPayToken, registerPaymentHost, payToken, preparePayment, syncPayment, type PayState } from '../services/checkout';
+import { renderPayPage } from '../services/pay-page';
 import {
   applySession,
+  chosenInstallments,
   createOrder,
   getPaymentSettingsRow,
   handleStripeEvent,
@@ -21,15 +27,15 @@ import {
   loadSellables,
   markOrderPaid,
   markOrderUnpaid,
+  PAY_NOTICES,
   paidInfoOfIntent,
   stripeOfRow,
-  toOffer,
   webhookSecretOfRow,
+  type OrderItemRow,
   type OrderRow,
-  type Sellable,
 } from '../services/payments';
 import { hit, type Limit } from '../services/ratelimit';
-import { StripeError, verifyStripeEvent, type CheckoutLineItem, type StripeClient } from '../services/stripe';
+import { StripeError, verifyStripeEvent, type StripeClient } from '../services/stripe';
 import { readFunnelSettings } from '../services/tracking';
 import { PUBLIC_URL, signId, verifySignedId } from '../util';
 import { notFoundPage, resolveIn, sendSimple, type FunnelRow, type Resolved } from './public';
@@ -71,7 +77,7 @@ const CHECKOUT_LIMIT: Limit = { max: 30, windowMs: 10 * 60_000 };
 const UPSELL_WINDOW_MS = 24 * 3600_000;
 const ORDER_COOKIE = 'scalo_order';
 const YEAR_MS = 365 * 86400_000;
-/** The return URL (it carries the Stripe session id) identifies the buyer only shortly after the payment. */
+/** The return URL (it carries the signed order id) identifies the buyer only shortly after the payment. */
 const RETURN_WINDOW_MS = 3600_000;
 
 const funnelBase = (f: FunnelRow) => f.base ?? `/p/${encodeURIComponent(f.slug)}`;
@@ -79,6 +85,8 @@ const stepPath = (f: FunnelRow, s: { slug: string }) => `${funnelBase(f)}/${enco
 /** Absolute origin of the funnel's pages: the custom domain when the step is served on one, PUBLIC_URL otherwise. */
 const originOf = (req: Request, f: FunnelRow) => (f.base === '' ? `${req.protocol}://${req.get('host')}` : PUBLIC_URL);
 const previewQs = (req: Request) => (typeof req.query.preview === 'string' && req.query.preview ? `preview=${encodeURIComponent(req.query.preview)}` : '');
+/** Fetch from the page's script (JSON in, JSON out) rather than a plain form post. */
+const wantsJson = (req: Request) => !!req.is('application/json');
 
 /** Step after this one (`skip`: the one after), legal pages skipped — same rule as the « étape suivante » links. */
 function forwardUrl(r: Resolved, skip = false): string {
@@ -87,18 +95,6 @@ function forwardUrl(r: Resolved, skip = false): string {
   const target = after[skip ? 1 : 0] ?? after[0] ?? r.step;
   return stepPath(r.funnel, target);
 }
-
-const lineItem = (s: Sellable): CheckoutLineItem => {
-  const o = toOffer(s);
-  return {
-    name: itemLabel(s),
-    description: s.description || undefined,
-    image: s.image_url && /^https:\/\//i.test(s.image_url) ? s.image_url : undefined,
-    unit_amount: o.amount_total,
-    currency: s.currency,
-    recurring: s.type === 'one_time' ? undefined : { interval: s.interval ?? 'month' },
-  };
-};
 
 function visitorContext(req: Request) {
   const cookies: Record<string, string> = {};
@@ -109,31 +105,74 @@ function visitorContext(req: Request) {
   return { visitor_id: typeof vid === 'string' && /^[\w-]{8,64}$/.test(vid) ? vid : null, cookies };
 }
 
-async function clientOf(userId: number): Promise<{ client: StripeClient; livemode: boolean } | null> {
+/** Stripe of the seller, when buyers can pay (secret key, and the publishable key Stripe Elements needs). */
+async function clientOf(userId: number): Promise<{ client: StripeClient; livemode: boolean; publishableKey: string } | null> {
   try {
     const row = await getPaymentSettingsRow(userId);
     const client = stripeOfRow(row);
-    return client ? { client, livemode: row.mode === 'live' } : null;
+    return client && row.stripe_publishable_key ? { client, livemode: row.mode === 'live', publishableKey: row.stripe_publishable_key } : null;
   } catch {
     return null; // unreadable key: the offer is simply unavailable for visitors
   }
 }
 
+const sparam = z.union([z.string(), z.number()]).transform(String).optional();
 const checkoutSchema = z.object({
   email: z.string().trim().max(254).optional().default(''),
   first_name: z.string().max(200).optional(),
   last_name: z.string().max(200).optional(),
   _block: z.string().max(100).optional(),
-  bump: z.string().max(10).optional(),
+  bump: sparam,
+  /** Number of payments chosen for an installments offer. */
+  installments: sparam,
+  /** Order of a previous attempt on this form (details changed with « Modifier »): abandoned. */
+  replaces: z.string().max(200).optional(),
 });
 const emailCheck = z.email();
 
-/** Order form of a step: creates the pending order, then sends the buyer to Stripe Checkout. */
+const isRecurringLine = (l: { sellable: { type: string }; installments?: number | null }) => l.sellable.type === 'subscription' || (l.installments ?? 0) > 1;
+
+/** URL the buyer comes back to once the payment is confirmed: records it, then the next step. */
+const returnUrl = (req: Request, r: Resolved, order: { id: number }, skip: boolean) =>
+  `${originOf(req, r.funnel)}${stepPath(r.funnel, r.step)}/paid?o=${encodeURIComponent(payToken(order.id))}${skip ? '&skip=1' : ''}`;
+const payPageUrl = (r: Resolved, order: { id: number }, extra = '') => `${stepPath(r.funnel, r.step)}/pay?o=${encodeURIComponent(payToken(order.id))}${extra}`;
+
+/** Answer of the JSON endpoints: what the page's script does next. */
+async function respondPayment(req: Request, res: Response, r: Resolved, order: OrderRow, client: StripeClient, skip: boolean) {
+  let st: PayState;
+  try {
+    st = await preparePayment(r.funnel.user_id, order, client);
+  } catch (e) {
+    console.error(`[stripe] préparation du paiement (commande ${order.id}) :`, (e as Error).message);
+    await markOrderUnpaid(r.funnel.user_id, order.id, 'failed', 'Paiement impossible à préparer (Stripe injoignable)');
+    return res.status(502).json({ error: PAY_NOTICES.error });
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  if (st.state === 'failed') return res.status(502).json({ error: PAY_NOTICES.error });
+  if (st.state !== 'confirm') return res.json({ next: returnUrl(req, r, order, skip) });
+  const name = [order.first_name, order.last_name].filter(Boolean).join(' ');
+  res.json({
+    o: payToken(order.id),
+    clientSecret: st.clientSecret,
+    returnUrl: returnUrl(req, r, order, skip),
+    payLabel: `Payer ${formatMoney(st.amount, st.currency)}`,
+    email: order.email,
+    name,
+  });
+}
+
+/**
+ * Order form of a step. From the page's script (JSON): creates the pending order and answers what Stripe Elements
+ * needs to collect the payment on the page. Plain form post (page that cannot run Stripe.js, no JavaScript): creates
+ * the order and sends the buyer to Scalo's payment page for it.
+ */
 export async function checkoutStep(req: Request, res: Response, r: Resolved) {
   const { funnel, step } = r;
   const here = stepPath(funnel, step);
   const pq = previewQs(req);
-  const back = (code: string) => res.redirect(303, `${here}?pay=${code}${pq ? `&${pq}` : ''}`);
+  const json = wantsJson(req);
+  const back = (code: string) =>
+    json ? res.status(code === 'error' ? 502 : 400).json({ error: PAY_NOTICES[code] ?? PAY_NOTICES.error }) : res.redirect(303, `${here}?pay=${code}${pq ? `&${pq}` : ''}`);
   if (pq) return back('preview');
   if ((await hit(`checkout:${req.ip ?? ''}`, CHECKOUT_LIMIT)).blocked) return back('limit');
 
@@ -152,12 +191,14 @@ export async function checkoutStep(req: Request, res: Response, r: Resolved) {
   const sellables = await loadSellables(funnel.user_id, [offerId, ...(bumpId && Number.isSafeInteger(bumpId) && bumpId > 0 ? [bumpId] : [])]);
   const main = sellables.find((s) => s.price_id === offerId);
   if (!main) return back('unavailable');
-  // order bump: only when ticked, and only in the currency of the main offer
-  const bump = bumpId && bumpId !== offerId ? sellables.find((s) => s.price_id === bumpId && s.currency === main.currency) : undefined;
+  const mainLine = { sellable: main, kind: 'main' as const, installments: chosenInstallments(main, body.installments) };
+  // order bump: only when ticked, in the currency of the main offer, and at most one recurring line per order
+  const bumpOffer = bumpId && bumpId !== offerId ? sellables.find((s) => s.price_id === bumpId && s.currency === main.currency) : undefined;
+  const bumpLine = bumpOffer ? { sellable: bumpOffer, kind: 'bump' as const, installments: chosenInstallments(bumpOffer, 1) } : null;
+  const lines = [mainLine, ...(bumpLine && !(isRecurringLine(bumpLine) && isRecurringLine(mainLine)) ? [bumpLine] : [])];
   const stripe = await clientOf(funnel.user_id);
   if (!stripe) return back('unavailable');
 
-  const lines = [{ sellable: main, kind: 'main' as const }, ...(bump ? [{ sellable: bump, kind: 'bump' as const }] : [])];
   const { order } = await createOrder({
     userId: funnel.user_id,
     email,
@@ -172,68 +213,143 @@ export async function checkoutStep(req: Request, res: Response, r: Resolved) {
     attribution: submitAttribution(req),
     visitor: visitorContext(req),
   });
-  const origin = originOf(req, funnel);
-  try {
-    const session = await stripe.client.createCheckoutSession(
-      {
-        mode: lines.some((l) => l.sellable.type !== 'one_time') ? 'subscription' : 'payment',
-        line_items: lines.map((l) => lineItem(l.sellable)),
-        customer_email: email,
-        success_url: `${origin}${here}/paid?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${origin}${here}?pay=cancel`,
-        metadata: { order_id: String(order.id), scalo_user: String(funnel.user_id) },
-        save_payment_method: true,
-      },
-      `scalo-order-${order.id}`,
-    );
-    if (!session.url) throw new Error('session sans URL');
-    await db.updateTable('orders').set({ stripe_session_id: session.id, updated_at: nowIso() }).where('id', '=', order.id).execute();
-    res.redirect(303, session.url);
-  } catch (e) {
-    console.error(`[stripe] création de la session (commande ${order.id}) :`, (e as Error).message);
-    await markOrderUnpaid(funnel.user_id, order.id, 'failed', 'Session de paiement impossible à créer');
-    back('error');
-  }
+  const replaced = orderOfPayToken(body.replaces);
+  if (replaced && replaced !== order.id) await markOrderUnpaid(funnel.user_id, replaced, 'canceled', `Remplacée par la commande n° ${order.id}`);
+  if (!json) return res.redirect(303, payPageUrl(r, order));
+  await respondPayment(req, res, r, order, stripe.client, false);
+}
+
+/** Order of the buyer (signed id) placed on this step, if any. */
+async function orderOfRequest(r: Resolved, token: unknown) {
+  const id = orderOfPayToken(token);
+  return id ? db.selectFrom('orders').selectAll().where('id', '=', id).where('user_id', '=', r.funnel.user_id).where('step_id', '=', r.step.id).executeTakeFirst() : undefined;
+}
+
+const payBodySchema = z.object({ o: z.string().max(200) });
+
+/** POST …/pay (JSON, Scalo's payment page): what Stripe Elements needs to collect the payment of an existing order. */
+export async function payStep(req: Request, res: Response, r: Resolved) {
+  if ((await hit(`pay:${req.ip ?? ''}`, CHECKOUT_LIMIT)).blocked) return res.status(429).json({ error: PAY_NOTICES.limit });
+  const parsed = payBodySchema.safeParse(req.body ?? {});
+  const order = parsed.success ? await orderOfRequest(r, parsed.data.o) : undefined;
+  if (!order || order.status === 'canceled') return res.status(404).json({ error: PAY_NOTICES.expired });
+  const skip = req.query.skip === '1';
+  if (order.status === 'paid' || order.status === 'refunded') return res.json({ next: returnUrl(req, r, order, skip) });
+  const stripe = await clientOf(r.funnel.user_id);
+  if (!stripe) return res.status(409).json({ error: PAY_NOTICES.unavailable });
+  await respondPayment(req, res, r, order, stripe.client, skip);
+}
+
+/** « 3 × 100,00 € / mois » plan of an order line, for the payment page. */
+function planOf(i: OrderItemRow): InstallmentOption | null {
+  if (i.type !== 'installments' || !i.installments || i.installment_amount === null) return null;
+  const first = i.amount_total - i.installment_amount * (i.installments - 1);
+  return { count: i.installments, total: i.amount_total, subtotal: i.amount_subtotal, tax: i.amount_tax, first, each: i.installment_amount, fee: 0 };
+}
+
+const PAGE_NOTICES: Record<string, string> = {
+  auth: 'Votre banque demande de confirmer ce paiement : choisissez votre moyen de paiement ci-dessous.',
+  declined: 'Le paiement avec le moyen de paiement enregistré a été refusé : utilisez-en un autre ci-dessous.',
+};
+
+/** GET …/pay?o= — Scalo's payment page for an order of this step. */
+export async function payPage(req: Request, res: Response, r: Resolved) {
+  const here = stepPath(r.funnel, r.step);
+  const order = await orderOfRequest(r, req.query.o);
+  if (!order || order.status === 'canceled') return res.redirect(303, here);
+  const skip = req.query.skip === '1';
+  if (order.status === 'paid' || order.status === 'refunded') return res.redirect(303, returnUrl(req, r, order, skip));
+  const stripe = await clientOf(r.funnel.user_id);
+  if (!stripe) return res.redirect(303, `${here}?pay=unavailable`);
+  registerPaymentHost(req, r.funnel.user_id);
+  const items = await db.selectFrom('order_items').selectAll().where('order_id', '=', order.id).orderBy('id').execute();
+  const settings = r.step.content?.settings ?? {};
+  const code = typeof req.query.notice === 'string' ? req.query.notice : '';
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Robots-Tag', 'noindex');
+  res.type('html').send(
+    renderPayPage({
+      title: r.funnel.name,
+      stripeKey: stripe.publishableKey,
+      orderToken: payToken(order.id),
+      endpoint: `${here}/pay${skip ? '?skip=1' : ''}`,
+      lines: items.map((i) => {
+        const plan = planOf(i);
+        return { label: itemLabel(i), price: priceLabel({ ...i, interval: i.interval as 'week' | 'month' | 'year' | null, currency: order.currency }, i.amount_total), detail: plan ? planDetail(plan, order.currency, i.interval, i.interval_count) : undefined };
+      }),
+      due: dueNow(items),
+      currency: order.currency,
+      accent: settings.accent,
+      background: settings.background,
+      font: settings.fontFamily,
+      backUrl: order.kind === 'checkout' ? here : forwardUrl(r, false),
+      notice: PAGE_NOTICES[code] ?? PAY_NOTICES[code],
+    }),
+  );
 }
 
 function setBuyerCookies(res: Response, funnel: FunnelRow, order: OrderRow) {
   if (order.contact_id) res.cookie('scalo_cid', signId('cid', order.contact_id), { httpOnly: true, sameSite: 'lax', maxAge: YEAR_MS, path: '/' });
-  // lets the next steps charge a one-click offer on the card saved by this order
+  // lets the next steps charge a one-click offer on the payment method saved by this order
   res.cookie(ORDER_COOKIE, signId('order', order.parent_order_id ?? order.id), { httpOnly: true, sameSite: 'lax', maxAge: UPSELL_WINDOW_MS, path: funnelBase(funnel) || '/' });
 }
 
-/** Return from Stripe Checkout (`?session_id=`): confirms the payment with Stripe (no need to wait for the webhook), then moves on. */
+/**
+ * Return after the payment (`?o=<signed order id>`): asks Stripe where the payment stands and records it (no need to
+ * wait for the webhook), then moves on. Not paid yet → back to the payment page. `?session_id=`: orders paid on
+ * Stripe Checkout before the payments moved to the funnel's pages.
+ */
 export async function paidStep(req: Request, res: Response, r: Resolved) {
   const { funnel, step } = r;
   const here = stepPath(funnel, step);
+  const skip = req.query.skip === '1';
+  let order: OrderRow | undefined;
   const sid = typeof req.query.session_id === 'string' && /^cs_[A-Za-z0-9_]{8,250}$/.test(req.query.session_id) ? req.query.session_id : null;
-  let order = sid ? await db.selectFrom('orders').selectAll().where('user_id', '=', funnel.user_id).where('stripe_session_id', '=', sid).executeTakeFirst() : undefined;
-  if (!sid || !order) return res.redirect(303, here);
-  let open = false;
-  if (order.status !== 'paid' && order.status !== 'refunded') {
-    const stripe = await clientOf(funnel.user_id);
-    try {
-      const session = await stripe?.client.retrieveCheckoutSession(sid);
-      if (session) {
-        open = session.status === 'open';
-        order = (await applySession(funnel.user_id, session)) ?? order;
+  if (sid) {
+    order = await db.selectFrom('orders').selectAll().where('user_id', '=', funnel.user_id).where('stripe_session_id', '=', sid).executeTakeFirst();
+    if (!order) return res.redirect(303, here);
+    let open = false;
+    if (order.status !== 'paid' && order.status !== 'refunded') {
+      try {
+        const stripe = await clientOf(funnel.user_id);
+        const session = await stripe?.client.retrieveCheckoutSession(sid);
+        if (session) {
+          open = session.status === 'open';
+          order = (await applySession(funnel.user_id, session)) ?? order;
+        }
+      } catch (e) {
+        console.error(`[stripe] retour de paiement (commande ${order.id}) :`, (e as Error).message);
       }
-    } catch (e) {
-      console.error(`[stripe] retour de paiement (commande ${order.id}) :`, (e as Error).message);
+    }
+    if (open) return res.redirect(303, `${here}?pay=cancel`);
+  } else {
+    order = await orderOfRequest(r, req.query.o);
+    if (!order) return res.redirect(303, here);
+    if (order.status !== 'paid' && order.status !== 'refunded') {
+      let st: PayState | null = null;
+      try {
+        const stripe = await clientOf(funnel.user_id);
+        st = stripe ? await syncPayment(funnel.user_id, order, stripe.client) : null;
+      } catch (e) {
+        console.error(`[stripe] retour de paiement (commande ${order.id}) :`, (e as Error).message);
+      }
+      // nothing confirmed (the buyer came back without paying): the payment page lets them do it
+      if (!st || st.state === 'confirm' || st.state === 'failed') return res.redirect(303, payPageUrl(r, order, skip ? '&skip=1' : ''));
+      order = (await db.selectFrom('orders').selectAll().where('id', '=', order.id).executeTakeFirst()) ?? order;
     }
   }
-  if (open) return res.redirect(303, `${here}?pay=cancel`);
-  // paid — or still being processed by the bank (the webhook will confirm): the buyer moves on either way
+  // paid — or still being processed by the bank (SEPA: the webhook will confirm): the buyer moves on either way
   if (order.status === 'paid' && order.paid_at && Date.now() - new Date(order.paid_at).getTime() < RETURN_WINDOW_MS) setBuyerCookies(res, funnel, order);
   res.setHeader('Cache-Control', 'no-store');
-  res.redirect(303, forwardUrl(r, req.query.skip === '1'));
+  res.redirect(303, forwardUrl(r, skip));
 }
 
-const upsellSchema = z.object({ _block: z.string().max(100).optional() });
+const upsellSchema = z.object({ _block: z.string().max(100).optional(), installments: sparam });
 
 /**
- * One-click offer: charges the card saved by the order the visitor just paid (signed cookie), without asking for it
- * again. Subscription offers, banks asking for authentication and refused cards fall back to Stripe Checkout.
+ * One-click offer: charges the payment method saved by the order the visitor just paid (signed cookie), without asking
+ * for it again — a payment, or a subscription / installment plan whose first invoice is paid now. When the bank asks
+ * for authentication or refuses the payment, the buyer confirms it on Scalo's payment page.
  */
 export async function upsellStep(req: Request, res: Response, r: Resolved) {
   const { funnel, step } = r;
@@ -256,7 +372,9 @@ export async function upsellStep(req: Request, res: Response, r: Resolved) {
   const offerId = Number(block?.offerId);
   const sellable = block && Number.isSafeInteger(offerId) && offerId > 0 ? (await loadSellables(funnel.user_id, [offerId]))[0] : undefined;
   if (!block || !sellable) return back('unavailable');
-  const forward = forwardUrl(r, !!block.skipNextOnAccept);
+  const count = chosenInstallments(sellable, parsed.success ? parsed.data.installments : undefined);
+  const skip = !!block.skipNextOnAccept;
+  const forward = forwardUrl(r, skip);
   const stripe = await clientOf(funnel.user_id);
   if (!stripe) return back('unavailable');
 
@@ -268,6 +386,7 @@ export async function upsellStep(req: Request, res: Response, r: Resolved) {
       .selectAll('o')
       .where('o.parent_order_id', '=', root.id)
       .where('o.kind', '=', 'upsell')
+      .where('o.status', '!=', 'canceled')
       .where((eb) => eb.exists(eb.selectFrom('order_items as i').select('i.id').whereRef('i.order_id', '=', 'o.id').where('i.price_id', '=', sellable.price_id)))
       .orderBy('o.id', 'desc')
       .executeTakeFirst();
@@ -284,7 +403,7 @@ export async function upsellStep(req: Request, res: Response, r: Resolved) {
         parentOrderId: root.id,
         kind: 'upsell',
         livemode: stripe.livemode,
-        lines: [{ sellable, kind: 'upsell' }],
+        lines: [{ sellable, kind: 'upsell', installments: count }],
         attribution: root.attribution,
         visitor: root.visitor,
         customerId: root.stripe_customer_id,
@@ -294,55 +413,38 @@ export async function upsellStep(req: Request, res: Response, r: Resolved) {
     return { order: created.order, reused: false };
   });
   if (order.status === 'paid' || order.status === 'refunded') return res.redirect(303, forward);
+  const payPage = (notice?: string) => res.redirect(303, payPageUrl(r, order, `${skip ? '&skip=1' : ''}${notice ? `&notice=${notice}` : ''}`));
 
+  // an order that already went through a one-click attempt goes straight to the payment page (it would fail the same way)
+  const oneClick = !!root.stripe_customer_id && !!root.stripe_payment_method_id && !reused;
+  if (!oneClick) return payPage();
+  const recurring = sellable.type === 'subscription' || (count ?? 0) > 1;
   const metadata = { order_id: String(order.id), scalo_user: String(funnel.user_id), parent_order_id: String(root.id) };
-  // an order that already failed goes straight to the hosted page (the same off-session request would fail the same way)
-  const oneClick = sellable.type === 'one_time' && !!root.stripe_customer_id && !!root.stripe_payment_method_id && !(reused && order.status !== 'pending');
-  if (oneClick) {
-    try {
-      const pi = await stripe.client.createOffSessionPayment(
-        { amount: order.amount_total, currency: order.currency, customer: root.stripe_customer_id!, payment_method: root.stripe_payment_method_id!, description: itemLabel(sellable), metadata },
-        `scalo-upsell-${order.id}`,
-      );
-      if (pi.status === 'succeeded') {
-        await markOrderPaid(funnel.user_id, order.id, paidInfoOfIntent(pi));
-        return res.redirect(303, forward);
-      }
-      if (pi.status === 'processing') {
-        await db.updateTable('orders').set({ stripe_payment_intent_id: pi.id, updated_at: nowIso() }).where('id', '=', order.id).execute();
-        return res.redirect(303, forward); // confirmed later by the webhook
-      }
-      // requires_action / requires_payment_method: the buyer has to be there → hosted page
-    } catch (e) {
-      const cardIssue = e instanceof StripeError && (e.type === 'card_error' || e.code === 'authentication_required' || e.status === 402);
-      if (!cardIssue) {
-        console.error(`[stripe] offre en un clic (commande ${order.id}) :`, (e as Error).message);
-        await markOrderUnpaid(funnel.user_id, order.id, 'failed', 'Paiement en un clic impossible');
-        return back('error');
-      }
-      // authentication required / card refused: Stripe Checkout lets the buyer authenticate or use another card
-    }
-  }
   try {
-    const origin = originOf(req, funnel);
-    const session = await stripe.client.createCheckoutSession(
-      {
-        mode: sellable.type === 'one_time' ? 'payment' : 'subscription',
-        line_items: [lineItem(sellable)],
-        ...(root.stripe_customer_id ? { customer: root.stripe_customer_id } : { customer_email: root.email }),
-        success_url: `${origin}${here}/paid?session_id={CHECKOUT_SESSION_ID}${block.skipNextOnAccept ? '&skip=1' : ''}`,
-        cancel_url: `${origin}${here}?pay=cancel`,
-        metadata,
-      },
-      `scalo-upsell-session-${order.id}-${Date.now()}`,
+    if (recurring) {
+      const st = await chargeSubscriptionOffSession(funnel.user_id, order, stripe.client, root.stripe_customer_id!, root.stripe_payment_method_id!);
+      if (st.state === 'paid' || st.state === 'processing') return res.redirect(303, forward);
+      return payPage('auth'); // the first invoice waits for the buyer (authentication, refused payment)
+    }
+    const pi = await stripe.client.createOffSessionPayment(
+      { amount: order.amount_total, currency: order.currency, customer: root.stripe_customer_id!, payment_method: root.stripe_payment_method_id!, description: itemLabel(sellable), metadata },
+      `scalo-upsell-${order.id}`,
     );
-    if (!session.url) throw new Error('session sans URL');
-    await db.updateTable('orders').set({ stripe_session_id: session.id, updated_at: nowIso() }).where('id', '=', order.id).execute();
-    res.redirect(303, session.url);
+    if (pi.status === 'succeeded') {
+      await markOrderPaid(funnel.user_id, order.id, paidInfoOfIntent(pi));
+      return res.redirect(303, forward);
+    }
+    if (pi.status === 'processing') {
+      await db.updateTable('orders').set({ stripe_payment_intent_id: pi.id, updated_at: nowIso() }).where('id', '=', order.id).execute();
+      return res.redirect(303, forward); // confirmed later by the webhook
+    }
+    return payPage('auth'); // requires_action / requires_payment_method: the buyer has to be there
   } catch (e) {
-    console.error(`[stripe] session de l’offre en un clic (commande ${order.id}) :`, (e as Error).message);
-    await markOrderUnpaid(funnel.user_id, order.id, 'failed', 'Session de paiement impossible à créer');
-    back('error');
+    const cardIssue = e instanceof StripeError && (e.type === 'card_error' || e.code === 'authentication_required' || e.status === 402);
+    if (cardIssue) return payPage(e.code === 'authentication_required' ? 'auth' : 'declined');
+    console.error(`[stripe] offre en un clic (commande ${order.id}) :`, (e as Error).message);
+    await markOrderUnpaid(funnel.user_id, order.id, 'failed', 'Paiement en un clic impossible');
+    return back('error');
   }
 }
 
@@ -357,6 +459,16 @@ paymentsPublicRouter.post('/p/:funnelSlug/:stepSlug/checkout', async (req, res) 
   const r = await resolve(req);
   if (!r) return sendSimple(res, notFoundPage());
   await checkoutStep(req, res, r);
+});
+paymentsPublicRouter.post('/p/:funnelSlug/:stepSlug/pay', async (req, res) => {
+  const r = await resolve(req);
+  if (!r) return res.status(404).json({ error: 'Page introuvable' });
+  await payStep(req, res, r);
+});
+paymentsPublicRouter.get('/p/:funnelSlug/:stepSlug/pay', async (req, res) => {
+  const r = await resolve(req);
+  if (!r) return sendSimple(res, notFoundPage());
+  await payPage(req, res, r);
 });
 paymentsPublicRouter.get('/p/:funnelSlug/:stepSlug/paid', async (req, res) => {
   const r = await resolve(req);

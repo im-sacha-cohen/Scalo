@@ -1,6 +1,7 @@
 // Stripe gateway. The rest of the app only talks to the narrow `StripeClient` interface below, built from the account's
 // own secret key ("bring your own Stripe"). The default implementation calls the Stripe REST API with `fetch` (pinned
-// API version, idempotency keys, timeout) — no card data ever goes through Scalo: buyers pay on Stripe Checkout.
+// API version, idempotency keys, timeout) — no card data ever goes through Scalo: buyers pay on the funnel's page in
+// Stripe Elements (Stripe's iframes), the server only creates and reads payment intents and subscriptions.
 // Tests inject a fake factory through `AppOptions.stripe` (no network).
 //
 // Secret keys are never logged nor put in error messages.
@@ -23,6 +24,8 @@ export interface StripePaymentIntent {
   latest_charge?: string | null;
   metadata?: Record<string, string>;
   last_payment_error?: { message?: string; code?: string } | null;
+  /** Given to the buyer's browser (Stripe Elements) to confirm the payment. */
+  client_secret?: string | null;
 }
 
 export interface StripeSubscription {
@@ -31,6 +34,8 @@ export interface StripeSubscription {
   customer?: string | null;
   default_payment_method?: string | null;
   metadata?: Record<string, string>;
+  /** Expanded (with its payment intent) by `createSubscription` / `retrieveSubscription`. */
+  latest_invoice?: (Omit<StripeInvoice, 'payment_intent'> & { payment_intent?: StripePaymentIntent | string | null; status?: string | null }) | string | null;
 }
 
 export interface StripeInvoice {
@@ -97,29 +102,43 @@ export interface StripeEvent {
 
 // ---------- parameters ----------
 
-export interface CheckoutLineItem {
+export interface CustomerParams {
+  email: string;
+  name?: string;
+  metadata: Record<string, string>;
+}
+
+/** A payment the buyer confirms in Stripe Elements (on-session). */
+export interface PaymentIntentParams {
+  amount: number;
+  currency: string;
+  customer: string;
+  /** card (Apple Pay / Google Pay included), sepa_debit. Never a method that leaves the page. */
+  payment_method_types: string[];
+  description?: string;
+  metadata: Record<string, string>;
+}
+
+export interface ProductParams {
   name: string;
   description?: string;
   image?: string;
-  /** Minor units, tax included. */
-  unit_amount: number;
-  currency: string;
-  recurring?: { interval: 'month' | 'year' };
+  metadata: Record<string, string>;
 }
 
-export interface CheckoutSessionParams {
-  mode: 'payment' | 'subscription';
-  line_items: CheckoutLineItem[];
-  success_url: string;
-  cancel_url: string;
-  customer_email?: string;
-  /** Existing Stripe customer (one-click upsell fallback). */
-  customer?: string;
-  /** Copied on the session, on its payment intent (payment mode) and on its subscription (subscription mode). */
+/** Amounts in minor units, tax included. */
+export interface SubscriptionParams {
+  customer: string;
+  currency: string;
+  /** The recurring line: subscription period or regular installment. */
+  item: { product: string; unit_amount: number; interval: 'week' | 'month' | 'year'; interval_count: number };
+  /** Added to the first invoice only: one-time lines (order bump), rounding cents of the first installment. */
+  add_invoice_items: { product: string; unit_amount: number }[];
+  payment_method_types: string[];
   metadata: Record<string, string>;
-  /** Payment mode: save the card for later off-session charges (one-click upsells). */
-  save_payment_method?: boolean;
-  locale?: string;
+  /** One-click upsell: charge the saved payment method now, without the buyer. Otherwise the first invoice waits for
+   * the buyer to confirm it in Stripe Elements (`default_incomplete`). */
+  off_session_payment_method?: string;
 }
 
 export interface OffSessionPaymentParams {
@@ -142,9 +161,19 @@ export interface RefundParams {
 export interface StripeClient {
   /** Checks the key (« Tester la connexion »). */
   retrieveAccount(): Promise<StripeAccount>;
-  createCheckoutSession(params: CheckoutSessionParams, idempotencyKey: string): Promise<StripeCheckoutSession>;
-  /** With `payment_intent`, `subscription` and `invoice` expanded. */
+  /** With `payment_intent`, `subscription` and `invoice` expanded. Orders paid on Stripe Checkout before 0015 only. */
   retrieveCheckoutSession(id: string): Promise<StripeCheckoutSession>;
+  createCustomer(params: CustomerParams, idempotencyKey: string): Promise<{ id: string }>;
+  /** Payment intent saving the payment method for later off-session charges (one-click upsells). */
+  createPaymentIntent(params: PaymentIntentParams, idempotencyKey: string): Promise<StripePaymentIntent>;
+  retrievePaymentIntent(id: string): Promise<StripePaymentIntent>;
+  createProduct(params: ProductParams, idempotencyKey: string): Promise<{ id: string }>;
+  /** With `latest_invoice.payment_intent` expanded. */
+  createSubscription(params: SubscriptionParams, idempotencyKey: string): Promise<StripeSubscription>;
+  /** With `latest_invoice.payment_intent` expanded. */
+  retrieveSubscription(id: string): Promise<StripeSubscription>;
+  /** Apple Pay / Google Pay on that host. */
+  registerPaymentMethodDomain(domain: string): Promise<void>;
   /**
    * Charges a saved card without the buyer (`off_session`, `confirm`). Resolves with the intent when Stripe accepted
    * the request; rejects with a `StripeError` (`code: 'authentication_required'`, `card_declined`…) otherwise.
@@ -216,36 +245,62 @@ export function createStripeClient(secretKey: string, fetchImpl: typeof fetch = 
       const a = await call<{ id: string; business_profile?: { name?: string | null } | null; settings?: { dashboard?: { display_name?: string | null } | null } | null; email?: string | null }>('GET', '/account');
       return { id: a.id, name: a.business_profile?.name || a.settings?.dashboard?.display_name || a.email || null };
     },
-    createCheckoutSession(p, idempotencyKey) {
-      const params: Record<string, unknown> = {
-        mode: p.mode,
-        success_url: p.success_url,
-        cancel_url: p.cancel_url,
-        client_reference_id: p.metadata.order_id,
-        metadata: p.metadata,
-        locale: p.locale ?? 'auto',
-        line_items: p.line_items.map((li) => ({
-          quantity: 1,
-          price_data: {
-            currency: li.currency,
-            unit_amount: li.unit_amount,
-            product_data: { name: li.name, ...(li.description ? { description: li.description.slice(0, 500) } : {}), ...(li.image ? { images: [li.image] } : {}) },
-            ...(li.recurring ? { recurring: { interval: li.recurring.interval } } : {}),
-          },
-        })),
-      };
-      if (p.customer) params.customer = p.customer;
-      else if (p.customer_email) params.customer_email = p.customer_email;
-      if (p.mode === 'payment') {
-        if (!p.customer) params.customer_creation = 'always';
-        params.payment_intent_data = { metadata: p.metadata, ...(p.save_payment_method ? { setup_future_usage: 'off_session' } : {}) };
-      } else {
-        params.subscription_data = { metadata: p.metadata };
-      }
-      return call<StripeCheckoutSession>('POST', '/checkout/sessions', params, idempotencyKey);
-    },
     retrieveCheckoutSession(id) {
       return call<StripeCheckoutSession>('GET', `/checkout/sessions/${encodeURIComponent(id)}`, { expand: ['payment_intent', 'subscription', 'invoice'] });
+    },
+    createCustomer(p, idempotencyKey) {
+      return call<{ id: string }>('POST', '/customers', { email: p.email, name: p.name || undefined, metadata: p.metadata }, idempotencyKey);
+    },
+    createPaymentIntent(p, idempotencyKey) {
+      return call<StripePaymentIntent>(
+        'POST',
+        '/payment_intents',
+        {
+          amount: p.amount,
+          currency: p.currency,
+          customer: p.customer,
+          payment_method_types: p.payment_method_types,
+          setup_future_usage: 'off_session',
+          description: p.description,
+          metadata: p.metadata,
+        },
+        idempotencyKey,
+      );
+    },
+    retrievePaymentIntent(id) {
+      return call<StripePaymentIntent>('GET', `/payment_intents/${encodeURIComponent(id)}`);
+    },
+    createProduct(p, idempotencyKey) {
+      return call<{ id: string }>(
+        'POST',
+        '/products',
+        { name: p.name, ...(p.description ? { description: p.description.slice(0, 500) } : {}), ...(p.image ? { images: [p.image] } : {}), metadata: p.metadata },
+        idempotencyKey,
+      );
+    },
+    createSubscription(p, idempotencyKey) {
+      const offSession = !!p.off_session_payment_method;
+      return call<StripeSubscription>(
+        'POST',
+        '/subscriptions',
+        {
+          customer: p.customer,
+          items: [{ price_data: { currency: p.currency, product: p.item.product, unit_amount: p.item.unit_amount, recurring: { interval: p.item.interval, interval_count: p.item.interval_count } } }],
+          add_invoice_items: p.add_invoice_items.map((i) => ({ price_data: { currency: p.currency, product: i.product, unit_amount: i.unit_amount } })),
+          payment_behavior: offSession ? 'allow_incomplete' : 'default_incomplete',
+          ...(offSession ? { default_payment_method: p.off_session_payment_method, off_session: true } : {}),
+          payment_settings: { payment_method_types: p.payment_method_types, save_default_payment_method: 'on_subscription' },
+          metadata: p.metadata,
+          expand: ['latest_invoice.payment_intent'],
+        },
+        idempotencyKey,
+      );
+    },
+    retrieveSubscription(id) {
+      return call<StripeSubscription>('GET', `/subscriptions/${encodeURIComponent(id)}`, { expand: ['latest_invoice.payment_intent'] });
+    },
+    async registerPaymentMethodDomain(domain) {
+      await call('POST', '/payment_method_domains', { domain_name: domain }, `scalo-pmd-${domain}`);
     },
     createOffSessionPayment(p, idempotencyKey) {
       return call<StripePaymentIntent>(

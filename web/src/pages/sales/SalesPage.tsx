@@ -2,8 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { Archive, ArchiveRestore, CreditCard, Package, Pencil, Plus, Receipt, Repeat, Search, ShoppingBag, ShoppingCart, Tag as TagIcon, Trash2, TrendingUp } from 'lucide-react';
-import { computeAmounts, priceLabel, type Campaign, type Product, type Tag } from '@scalo/shared';
-import { api } from '../../lib/api';
+import { computeAmounts, priceLabel, type Product } from '@scalo/shared';
 import { fmtDateTime, fmtNumber, fmtRelative } from '../../lib/format';
 import { useDebounced, useLoad } from '../../lib/hooks';
 import { paymentsApi, type OrderFilter } from '../../lib/payments-api';
@@ -11,7 +10,6 @@ import { useConfirm } from '../../components/ConfirmDialog';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, EmptyState, ErrorState, IconButton, Input, PageHeader, Pagination, Select, Skeleton, StatCard, Tabs } from '../../components/ui';
 import { buyerName, money, OrderStatusBadge } from './labels';
-import { ProductModal } from './ProductModal';
 
 type TabId = 'orders' | 'products';
 const PERIODS = [
@@ -231,15 +229,11 @@ function OrdersTab() {
 function ProductsTab({ connected }: { connected: boolean }) {
   const toast = useToast();
   const confirm = useConfirm();
+  const navigate = useNavigate();
   const [archived, setArchived] = useState(false);
   const { data, error, loading, reload } = useLoad(() => paymentsApi.products(archived), [archived]);
-  const [tags, setTags] = useState<Tag[]>([]);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [editing, setEditing] = useState<Product | 'new' | null>(null);
-  useEffect(() => {
-    api.tags().then(setTags).catch(() => {});
-    api.campaigns().then(setCampaigns).catch(() => {});
-  }, [editing]);
+  const create = () => navigate('/sales/products/new');
+  const edit = (p: Product) => navigate(`/sales/products/${p.id}`);
 
   const toggleArchive = async (p: Product) => {
     try {
@@ -276,7 +270,7 @@ function ProductsTab({ connected }: { connected: boolean }) {
           <input type="checkbox" className="h-4 w-4 rounded border-slate-300 text-brand-600" checked={archived} onChange={(e) => setArchived(e.target.checked)} />
           Afficher les produits archivés
         </label>
-        <Button icon={Plus} onClick={() => setEditing('new')}>
+        <Button icon={Plus} onClick={create}>
           Nouveau produit
         </Button>
       </div>
@@ -294,7 +288,7 @@ function ProductsTab({ connected }: { connected: boolean }) {
           title="Aucun produit"
           description={connected ? 'Créez votre premier produit, puis vendez-le avec un bloc « Paiement » dans un tunnel.' : 'Créez votre premier produit. Pour encaisser, connectez Stripe dans Paramètres → Paiements.'}
           action={
-            <Button icon={Plus} onClick={() => setEditing('new')}>
+            <Button icon={Plus} onClick={create}>
               Nouveau produit
             </Button>
           }
@@ -312,7 +306,7 @@ function ProductsTab({ connected }: { connected: boolean }) {
               )}
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap items-center gap-2">
-                  <button type="button" className="truncate font-display text-[15px] font-bold text-ink hover:text-brand-700" onClick={() => setEditing(p)}>
+                  <button type="button" className="truncate font-display text-[15px] font-bold text-ink hover:text-brand-700" onClick={() => edit(p)}>
                     {p.name}
                   </button>
                   {p.archived && <Badge>Archivé</Badge>}
@@ -337,25 +331,13 @@ function ProductsTab({ connected }: { connected: boolean }) {
                 <p className="text-xs text-slate-500">vente{(p.sales_count ?? 0) > 1 ? 's' : ''}</p>
               </div>
               <div className="flex items-center gap-1">
-                <IconButton icon={Pencil} label="Modifier" onClick={() => setEditing(p)} />
+                <IconButton icon={Pencil} label="Modifier" onClick={() => edit(p)} />
                 <IconButton icon={p.archived ? ArchiveRestore : Archive} label={p.archived ? 'Remettre en vente' : 'Archiver'} onClick={() => toggleArchive(p)} />
                 <IconButton icon={Trash2} label="Supprimer" onClick={() => remove(p)} />
               </div>
             </Card>
           ))}
         </div>
-      )}
-      {editing && (
-        <ProductModal
-          product={editing === 'new' ? null : editing}
-          tags={tags}
-          campaigns={campaigns}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
-            reload();
-          }}
-        />
       )}
     </>
   );
