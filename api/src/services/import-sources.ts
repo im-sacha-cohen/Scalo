@@ -1,7 +1,16 @@
 // Contact import, source side: CSV parsing, column presets of the usual export files (systeme.io, Mailchimp, Brevo,
 // ActiveCampaign, Kit), suggested mapping, and normalization of one source record into a contact to import.
 import { z } from 'zod';
-import { IMPORT_PRESET_LABELS, type ImportColumn, type ImportColumnMapping, type ImportTarget } from '@scalo/shared';
+import {
+  IMPORT_CHECKED_TYPES,
+  IMPORT_PRESET_LABELS,
+  isValidFieldValue,
+  suggestFieldType,
+  type ImportColumn,
+  type ImportColumnMapping,
+  type ImportColumnStats,
+  type ImportTarget,
+} from '@scalo/shared';
 import type { FieldDef } from './fields';
 import type { SioContact } from './systeme-io';
 
@@ -206,6 +215,55 @@ export function suggestCsvMapping(columns: string[], headers: string[], defs: Fi
   return { preset, mapping };
 }
 
+const MAX_DISTINCT = 100;
+const MAX_EXAMPLES = 3;
+
+/**
+ * What a column contains, for the mapping step: non-empty values, distinct values (options of a list field), values a
+ * field of each checked type would reject (count + examples), and the type that fits every value.
+ */
+export function columnStats(values: Iterable<string>): ImportColumnStats {
+  const invalid = Object.fromEntries(IMPORT_CHECKED_TYPES.map((t) => [t, { count: 0, examples: [] as string[] }])) as ImportColumnStats['invalid'];
+  const distinct = new Map<string, string>();
+  let more = false;
+  let filled = 0;
+  const forType: string[] = []; // values used for the type suggestion (distinct, bounded)
+  for (const raw of values) {
+    const v = raw.trim();
+    if (!v) continue;
+    filled++;
+    const k = v.toLowerCase();
+    const seen = distinct.has(k);
+    if (!seen) {
+      if (distinct.size < MAX_DISTINCT) distinct.set(k, v.slice(0, 100));
+      else more = true;
+    }
+    if (forType.length < 2000) forType.push(v);
+    for (const t of IMPORT_CHECKED_TYPES) {
+      if (isValidFieldValue(t, v)) continue;
+      const bucket = invalid[t];
+      bucket.count++;
+      if (bucket.examples.length < MAX_EXAMPLES && !bucket.examples.includes(v.slice(0, 80))) bucket.examples.push(v.slice(0, 80));
+    }
+  }
+  let suggested = suggestFieldType(forType);
+  // the suggestion was made on a sample: it must also fit every value of the column
+  if (suggested !== 'text' && suggested !== 'select' && invalid[suggested].count > 0) suggested = 'text';
+  if (suggested === 'select' && more) suggested = 'text';
+  // a few typos (« abc » in a column of amounts) do not make a column text: the type that fits at least 80 % of the
+  // values is proposed, the others are reported in the mapping step (and ignored at import, in the journal)
+  if (suggested === 'text' && filled >= 2) {
+    for (const t of ['number', 'datetime', 'date'] as const) {
+      const ok = forType.filter((v) => isValidFieldValue(t, v));
+      if (ok.length >= 2 && (filled - invalid[t].count) / filled >= 0.8 && suggestFieldType(ok) === t) {
+        suggested = t;
+        break;
+      }
+    }
+  }
+  return { filled, distinct: [...distinct.values()], distinct_more: more, invalid, suggested_type: suggested };
+}
+
 export function csvColumns(csv: ParsedCsv, samples = 3): ImportColumn[] {
   return csv.columns.map((column, i) => {
     const values: string[] = [];
@@ -214,7 +272,10 @@ export function csvColumns(csv: ParsedCsv, samples = 3): ImportColumn[] {
       if (v && !values.includes(v)) values.push(v.slice(0, 80));
       if (values.length >= samples) break;
     }
-    return { column, label: column, samples: values };
+    const stats = columnStats((function* () {
+      for (const r of csv.rows) yield r.cells[i] ?? '';
+    })());
+    return { column, label: column, samples: values, stats };
   });
 }
 
@@ -263,12 +324,17 @@ export function sioAnalysis(contacts: SioContact[], fieldLabels: Record<string, 
     }
     return out;
   };
-  const columns: ImportColumn[] = SIO_BASE_COLUMNS.map((c) => ({ column: c.column, label: c.label, samples: sample(c.column) }));
+  const stats = (column: string) =>
+    columnStats(records.map((r) => {
+      const raw = r.values[column];
+      return Array.isArray(raw) ? raw.join(', ') : raw ?? '';
+    }));
+  const columns: ImportColumn[] = SIO_BASE_COLUMNS.map((c) => ({ column: c.column, label: c.label, samples: sample(c.column), stats: stats(c.column) }));
   const mapping: ImportColumnMapping[] = SIO_BASE_COLUMNS.map((c) => ({ column: c.column, target: c.target }));
   const used = new Set<string>();
   for (const [slug, label] of Object.entries(labels)) {
     const column = `field:${slug}`;
-    columns.push({ column, label: SIO_FIELD_LABELS[slug] && label === slug ? SIO_FIELD_LABELS[slug] : label || slug, samples: sample(column) });
+    columns.push({ column, label: SIO_FIELD_LABELS[slug] && label === slug ? SIO_FIELD_LABELS[slug] : label || slug, samples: sample(column), stats: stats(column) });
     const builtin = SIO_FIELD_TARGETS[slug];
     if (builtin && !used.has(builtin)) {
       used.add(builtin);

@@ -12,6 +12,7 @@ import {
   type SegmentFilter,
 } from '@scalo/shared';
 import type { CrmRefs } from '../lib/crm-refs';
+import { isoToLocalInput, localInputToIso } from '../lib/format';
 import { Button, cx, Input, Select } from './ui';
 
 const TYPE_LABELS: Record<SegmentConditionType, string> = {
@@ -34,13 +35,17 @@ const OP_LABELS: Record<FieldOperator, string> = {
   not_contains: 'ne contient pas',
   gt: 'est supérieur à',
   lt: 'est inférieur à',
+  within_days: 'dans les derniers',
   empty: 'est vide',
   not_empty: 'n’est pas vide',
 };
 
+const isDateType = (t: CustomField['type'] | 'text') => t === 'date' || t === 'datetime';
+
 function fieldOps(type: CustomField['type'] | 'text'): FieldOperator[] {
   if (type === 'number') return ['eq', 'neq', 'gt', 'lt', 'empty', 'not_empty'];
-  if (type === 'date') return ['eq', 'gt', 'lt', 'empty', 'not_empty'];
+  if (type === 'date') return ['eq', 'gt', 'lt', 'within_days', 'empty', 'not_empty'];
+  if (type === 'datetime') return ['gt', 'lt', 'within_days', 'empty', 'not_empty'];
   if (type === 'checkbox') return ['eq'];
   if (type === 'select') return ['eq', 'neq', 'empty', 'not_empty'];
   return ['eq', 'neq', 'contains', 'not_contains', 'empty', 'not_empty'];
@@ -52,7 +57,7 @@ export function defaultCondition(type: SegmentConditionType, refs: CrmRefs): Seg
       return { type, op: 'has', tag_id: refs.tags[0]?.id ?? 0 };
     case 'field': {
       const f = refs.fields[0];
-      return f ? { type, key: f.key, op: f.type === 'checkbox' ? 'eq' : f.type === 'number' ? 'gt' : 'eq', value: f.type === 'checkbox' ? true : '' } : { type, key: 'email', op: 'contains', value: '' };
+      return f ? { type, key: f.key, op: f.type === 'checkbox' ? 'eq' : f.type === 'number' || f.type === 'datetime' ? 'gt' : 'eq', value: f.type === 'checkbox' ? true : '' } : { type, key: 'email', op: 'contains', value: '' };
     }
     case 'status':
       return { type, op: 'is', value: 'confirmed' };
@@ -135,7 +140,8 @@ function ConditionRow({ c, onChange, refs }: { c: SegmentCondition; onChange: (c
             onChange={(e) => {
               const d = refs.fields.find((f) => f.key === e.target.value);
               const t = d?.type ?? 'text';
-              onChange({ ...c, key: e.target.value, op: fieldOps(t).includes(c.op) ? c.op : fieldOps(t)[0], value: t === 'checkbox' ? true : '' });
+              const op = fieldOps(t).includes(c.op) ? c.op : fieldOps(t)[0];
+              onChange({ ...c, key: e.target.value, op, value: t === 'checkbox' ? true : op === 'within_days' ? 7 : '' });
             }}
           >
             <optgroup label="Contact">
@@ -162,15 +168,37 @@ function ConditionRow({ c, onChange, refs }: { c: SegmentCondition; onChange: (c
             </Select>
           ) : (
             <>
-              <Select className="w-40" value={c.op} onChange={(e) => onChange({ ...c, op: e.target.value as FieldOperator })}>
+              <Select
+                className="w-40"
+                value={c.op}
+                onChange={(e) => {
+                  const op = e.target.value as FieldOperator;
+                  // « dans les N derniers jours » takes a number of days, the other operators a date
+                  const value = (op === 'within_days') === (c.op === 'within_days') ? c.value : op === 'within_days' ? 7 : '';
+                  onChange({ ...c, op, value });
+                }}
+              >
                 {ops.map((o) => (
                   <option key={o} value={o}>
-                    {ftype === 'date' && o === 'gt' ? 'est après le' : ftype === 'date' && o === 'lt' ? 'est avant le' : OP_LABELS[o]}
+                    {isDateType(ftype) && o === 'gt' ? 'est après le' : isDateType(ftype) && o === 'lt' ? 'est avant le' : OP_LABELS[o]}
                   </option>
                 ))}
               </Select>
               {needsValue &&
-                (ftype === 'select' ? (
+                (c.op === 'within_days' ? (
+                  <span className="flex items-center gap-2 text-sm text-slate-600">
+                    <Input className={cx('w-20', small)} type="number" min={0} value={String(c.value ?? '')} aria-label="Nombre de jours" onChange={(e) => onChange({ ...c, value: e.target.value === '' ? '' : Math.max(0, Math.trunc(Number(e.target.value))) })} />
+                    jours
+                  </span>
+                ) : ftype === 'datetime' ? (
+                  <Input
+                    className={cx('min-w-44 flex-1', small)}
+                    type="datetime-local"
+                    aria-label="Date et heure"
+                    value={isoToLocalInput(typeof c.value === 'string' ? c.value : '')}
+                    onChange={(e) => onChange({ ...c, value: localInputToIso(e.target.value) })}
+                  />
+                ) : ftype === 'select' ? (
                   <Select className="min-w-32 flex-1" value={String(c.value ?? '')} onChange={(e) => onChange({ ...c, value: e.target.value })}>
                     <option value="">Choisir…</option>
                     {def!.options.map((o) => (

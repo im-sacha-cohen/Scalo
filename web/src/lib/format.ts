@@ -116,3 +116,29 @@ export function fmtCountdown(iso: string, now = Date.now()) {
   if (s < 60) return `dans ${Math.ceil(s)} s`;
   return `dans ${fmtDuration(s)}`;
 }
+
+// ---------- « Date et heure » custom fields (stored as ISO 8601 UTC, shown and typed in the browser's time zone) ----------
+
+/** ISO instant → value of an `<input type="datetime-local">` ('YYYY-MM-DDTHH:mm', local time). */
+export function isoToLocalInput(iso: string | null | undefined) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Value of an `<input type="datetime-local">` (local time) → ISO instant ('' when empty or invalid). */
+export function localInputToIso(v: string) {
+  if (!v) return '';
+  const d = new Date(v); // 'YYYY-MM-DDTHH:mm' without offset = local time
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString();
+}
+
+/** "1 oct. 2026 à 14:30" in the browser's time zone. */
+export function fmtFieldDateTime(iso: string | null | undefined) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return `${d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })} à ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+}

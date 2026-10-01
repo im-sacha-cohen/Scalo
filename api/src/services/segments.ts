@@ -5,7 +5,7 @@
 // operators come from fixed lists (never from the input). Referencing a deleted tag / campaign simply never matches.
 import { sql, type Expression, type ExpressionBuilder, type SelectQueryBuilder, type SqlBool } from 'kysely';
 import { z } from 'zod';
-import { BUILTIN_FIELDS, isFilterGroup, type SegmentCondition, type SegmentFilter } from '@scalo/shared';
+import { BUILTIN_FIELDS, isFilterGroup, parseFieldDateTime, type SegmentCondition, type SegmentFilter } from '@scalo/shared';
 import { db, type Database, type Db } from '../db';
 import { HttpError, likeEscape } from '../util';
 import { fieldDefMap, parseDate, type FieldDef } from './fields';
@@ -24,7 +24,7 @@ const conditionSchema: z.ZodType<SegmentCondition> = z.discriminatedUnion('type'
   z.object({
     type: z.literal('field'),
     key: z.string().trim().min(1).max(40),
-    op: z.enum(['eq', 'neq', 'contains', 'not_contains', 'gt', 'lt', 'empty', 'not_empty']),
+    op: z.enum(['eq', 'neq', 'contains', 'not_contains', 'gt', 'lt', 'within_days', 'empty', 'not_empty']),
     value: z.union([z.string().max(1000), z.number(), z.boolean()]).nullable().optional(),
   }),
   z.object({ type: z.literal('status'), op: z.enum(['is', 'is_not']).default('is'), value: z.enum(['confirmed', 'pending_confirmation', 'unsubscribed', 'bounced']) }),
@@ -87,6 +87,14 @@ export async function assertFilter(userId: number, filter: SegmentFilter, ex: Db
       if ((c.op === 'gt' || c.op === 'lt') && def?.type === 'date' && !parseDate(String(c.value))) {
         throw new HttpError(400, `Condition sur « ${def.label} » : date attendue`);
       }
+      if ((c.op === 'gt' || c.op === 'lt' || c.op === 'eq' || c.op === 'neq') && def?.type === 'datetime' && !parseFieldDateTime(String(c.value))) {
+        throw new HttpError(400, `Condition sur « ${def.label} » : date et heure attendues (ISO 8601)`);
+      }
+      if (c.op === 'within_days') {
+        if (!def || (def.type !== 'date' && def.type !== 'datetime')) throw new HttpError(400, `Condition sur « ${def?.label ?? c.key} » : « dans les derniers jours » ne s’applique qu’aux dates`);
+        const n = Number(c.value);
+        if (!Number.isInteger(n) || n < 0 || n > 36500) throw new HttpError(400, `Condition sur « ${def.label} » : nombre de jours attendu`);
+      }
     }
     if (c.type === 'created') {
       if ((c.op === 'before' || c.op === 'after') && !parseDate(String(c.value))) throw new HttpError(400, 'Date de création : date attendue (AAAA-MM-JJ)');
@@ -130,14 +138,36 @@ function fieldCondition(eb: CEb, c: Extract<SegmentCondition, { type: 'field' }>
       break; // contains on a number: text semantics below
     }
     case 'date': {
+      const dateOf = sql<string | null>`(CASE WHEN ${text} ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN ${text} END)`;
+      if (c.op === 'within_days') {
+        // today and the N previous days (UTC)
+        const n = Math.trunc(Number(v));
+        if (!Number.isInteger(n) || n < 0) return sql<boolean>`false`;
+        return sql<boolean>`(${dateOf})::date BETWEEN (now() AT TIME ZONE 'UTC')::date - ${n}::int AND (now() AT TIME ZONE 'UTC')::date`;
+      }
       const d = parseDate(String(v));
       if (!d) return sql<boolean>`false`;
-      const dateOf = sql<string | null>`(CASE WHEN ${text} ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN ${text} END)`;
       if (c.op === 'gt') return sql<boolean>`${dateOf} > ${d}`;
       if (c.op === 'lt') return sql<boolean>`${dateOf} < ${d}`;
       if (c.op === 'eq') return sql<boolean>`${dateOf} = ${d}`;
       if (c.op === 'neq') return sql<boolean>`${dateOf} IS DISTINCT FROM ${d}`;
       break;
+    }
+    case 'datetime': {
+      // stored as ISO 8601 UTC; anything else (hand-edited data) never matches
+      const at = sql<string | null>`(CASE WHEN ${text} ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$' THEN (${text})::timestamptz END)`;
+      if (c.op === 'within_days') {
+        const n = Math.trunc(Number(v));
+        if (!Number.isInteger(n) || n < 0) return sql<boolean>`false`;
+        return sql<boolean>`${at} BETWEEN now() - make_interval(days => ${n}) AND now()`;
+      }
+      const d = parseFieldDateTime(String(v));
+      if (!d) return sql<boolean>`false`;
+      if (c.op === 'gt') return sql<boolean>`${at} > ${d}::timestamptz`;
+      if (c.op === 'lt') return sql<boolean>`${at} < ${d}::timestamptz`;
+      if (c.op === 'eq') return sql<boolean>`${at} = ${d}::timestamptz`;
+      if (c.op === 'neq') return sql<boolean>`${at} IS DISTINCT FROM ${d}::timestamptz`;
+      return sql<boolean>`false`;
     }
     case 'checkbox': {
       const want = v === true || ['true', '1', 'oui', 'yes'].includes(String(v).toLowerCase());
@@ -162,7 +192,7 @@ function fieldCondition(eb: CEb, c: Extract<SegmentCondition, { type: 'field' }>
     case 'lt':
       return sql<boolean>`${text} < ${s}`;
   }
-  return sql<boolean>`false`;
+  return sql<boolean>`false`; // within_days on a non-date field
 }
 
 function statusCondition(eb: CEb, value: string): Expression<SqlBool> {

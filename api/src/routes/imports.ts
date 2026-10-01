@@ -2,7 +2,7 @@
 // The heavy work is done by the worker (services/imports.ts); these routes only analyze, preview, queue and report.
 import { Router, type Response } from 'express';
 import { z } from 'zod';
-import { CUSTOM_FIELD_KEY_RE, IMPORT_TARGETS, type ImportAnalysis, type ImportColumnMapping, type ImportTarget } from '@scalo/shared';
+import { CUSTOM_FIELD_KEY_RE, CUSTOM_FIELD_TYPES, IMPORT_TARGETS, type ImportAnalysis, type ImportColumnMapping, type ImportTarget } from '@scalo/shared';
 import { db, type Db } from '../db';
 import { createField, keyFromLabel } from './crm';
 import { fieldDefMap, listFieldDefs } from '../services/fields';
@@ -30,7 +30,15 @@ const mappingSchema = z
       column: z.string().min(1).max(200),
       target: z.enum(IMPORT_TARGETS),
       field_key: z.string().regex(CUSTOM_FIELD_KEY_RE).optional(),
-      create: z.object({ label: z.string().trim().min(1).max(80), type: z.enum(['text', 'number', 'date', 'checkbox']) }).optional(),
+      create: z
+        .object({
+          label: z.string().trim().min(1).max(80),
+          type: z.enum(CUSTOM_FIELD_TYPES),
+          // list field: options proposed from the distinct values of the column (editable in the mapping step)
+          options: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
+        })
+        .refine((c) => c.type !== 'select' || (c.options?.length ?? 0) > 0, { message: 'Ajoutez au moins une option à la liste', path: ['options'] })
+        .optional(),
     }),
   )
   .min(1)
@@ -86,7 +94,8 @@ async function resolveMapping(userId: number, mapping: ImportColumnMapping[], ex
       out.push({ column: m.column, target: 'field', field_key: existing.key });
       continue;
     }
-    const created = await createField(userId, { label: m.create!.label, type: m.create!.type, key }, ex);
+    const options = m.create!.type === 'select' ? [...new Map((m.create!.options ?? []).map((o) => [o.toLowerCase(), o])).values()] : undefined;
+    const created = await createField(userId, { label: m.create!.label, type: m.create!.type, key, options }, ex);
     defs.set(created.key, created);
     out.push({ column: m.column, target: 'field', field_key: created.key });
   }

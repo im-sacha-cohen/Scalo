@@ -1012,6 +1012,10 @@ function customInput(f: FormFieldLike, inputCss: string, ctx: RenderContext) {
     const opts = arr<unknown>(f.options).map((o) => str(o)).filter(Boolean);
     return `<select name="${name}" aria-label="${label}"${req}${dis} style="${inputCss}"><option value="">${label}</option>${opts.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select>`;
   }
+  if (f.input === 'datetime') {
+    // a date-time input shows no placeholder: visible label. Read on the server in Europe/Paris (DEFAULT_FIELD_TIMEZONE).
+    return `<label style="${css({ display: 'block', margin: 0, fontSize: 14, textAlign: 'left' })}">${label} <span style="${css({ opacity: 0.65, fontSize: 12 })}">(heure de Paris)</span><input type="datetime-local" name="${name}" aria-label="${label}"${req}${dis} style="${inputCss};margin:4px 0 12px"></label>`;
+  }
   const type = f.input === 'number' ? 'number' : f.input === 'date' ? 'date' : 'text';
   return `<input type="${type}" name="${name}"${type === 'number' ? ' step="any"' : ''} placeholder="${label}" aria-label="${label}"${req}${dis} style="${inputCss}">`;
 }

@@ -196,16 +196,19 @@ const csvCell = (v: unknown) => {
   return /[",;\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 };
 
-contactsRouter.get('/contacts/export', async (req, res) => {
-  const userId = uid(req);
+/** CSV of every contact of the account (also part of the account data export, services/account.ts). */
+export async function contactsCsv(userId: number): Promise<string> {
   const rows = await db.selectFrom('contacts').selectAll().where('user_id', '=', userId).orderBy('created_at', 'desc').orderBy('id', 'desc').execute();
-  const tags = await tagsForContacts(rows.map((r) => r.id));
+  // by chunks: a query takes at most 65 535 bound parameters
+  const tags = new Map<number, { id: number; name: string }[]>();
+  for (let i = 0; i < rows.length; i += 10_000) for (const [k, v] of await tagsForContacts(rows.slice(i, i + 10_000).map((r) => r.id))) tags.set(k, v);
   // one column per custom field (header = key: re-importable as is)
   const defs = [...(await fieldDefMap(userId)).values()];
   const lines = [['email', 'first_name', 'last_name', 'phone', 'tags', 'unsubscribed', 'created_at', 'confirmed_at', ...defs.map((d) => d.key)].map(csvCell).join(',')];
   for (const r of rows) {
     const custom = defs.map((d) => {
       const v = r.fields?.[d.key];
+      // date et heure: `JJ/MM/AAAA HH:mm` (heure de Paris), read back as is by the import
       return v === undefined ? '' : d.type === 'checkbox' ? (v ? 'oui' : 'non') : d.type === 'date' ? String(v) : formatFieldValue(d.type, v);
     });
     lines.push(
@@ -214,9 +217,14 @@ contactsRouter.get('/contacts/export', async (req, res) => {
         .join(','),
     );
   }
+  return '\ufeff' + lines.join('\n') + '\n';
+}
+
+contactsRouter.get('/contacts/export', async (req, res) => {
+  const csv = await contactsCsv(uid(req));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="contacts.csv"');
-  res.send('\ufeff' + lines.join('\n') + '\n');
+  res.send(csv);
 });
 
 contactsRouter.get('/contacts/:id', async (req, res) => {

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import { cx } from '../../components/ui';
+import { ACCOUNT_DELETED_FLAG } from '../../lib/account-api';
 import { Logo, LogoMark } from '../../components/Layout';
 
 /* Public marketing page (English: Scalo targets an international audience). Brand rules: brand/BRAND.md —
@@ -641,6 +642,37 @@ function Footer() {
   );
 }
 
+/** Shown once after the deletion of an account (flag set by Paramètres → Données et compte). */
+function AccountDeletedNotice() {
+  const [show, setShow] = useState(() => {
+    try {
+      return sessionStorage.getItem(ACCOUNT_DELETED_FLAG) === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.removeItem(ACCOUNT_DELETED_FLAG);
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
+  if (!show) return null;
+  return (
+    <div role="status" className="fixed inset-x-0 top-20 z-[60] flex justify-center px-4">
+      <div className="flex max-w-xl items-start gap-3 rounded-2xl bg-white px-4 py-3 text-sm text-slate-700 shadow-pop ring-1 ring-slate-200">
+        <p>
+          <strong className="text-ink">Votre compte a été supprimé.</strong> Vos données, vos pages publiques et vos accès ont été effacés. Merci d’avoir utilisé Scalo.
+        </p>
+        <button type="button" onClick={() => setShow(false)} className="-mr-1 rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Fermer">
+          <X size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function LandingPage() {
   useEffect(() => {
     const prev = document.title;
@@ -649,6 +681,7 @@ export function LandingPage() {
   }, []);
   return (
     <div className="landing-root min-h-full bg-ink">
+      <AccountDeletedNotice />
       <Nav />
       <main>
         <Hero />

@@ -62,7 +62,7 @@ export type ButtonBlock = Base<'button'> & {
 export type ContactField = 'email' | 'first_name' | 'last_name' | 'phone';
 /** Custom field of the contact (`field.<key>`, see CustomField); `input`/`options` are copied from its definition. */
 export type CustomFormField = `field.${string}`;
-export type FormFieldInput = 'text' | 'number' | 'date' | 'select' | 'checkbox';
+export type FormFieldInput = 'text' | 'number' | 'date' | 'datetime' | 'select' | 'checkbox';
 export type FormBlock = Base<'form'> & {
   fields: { name: ContactField | CustomFormField; label: string; required?: boolean; input?: FormFieldInput; options?: string[] }[];
   submitLabel: string;

@@ -37,6 +37,8 @@ import type { AiOptions } from './services/ai';
 import { editionGate, editionPublicGate } from './routes/edition';
 import { createSpaRouter } from './routes/spa';
 import { onboardingRouter } from './routes/onboarding';
+import { createAccountRouter } from './routes/account';
+import type { DeletionOptions } from './services/account';
 
 /** Postgres errors that reach the error handler (the routes handle the expected ones with specific messages). */
 function pgErrorStatus(e: unknown): { status: number; error: string } | null {
@@ -68,6 +70,8 @@ export interface AppOptions {
   ai?: AiOptions;
   /** Built web app served by the API (routes/spa.ts). Default: WEB_DIST, or `web/dist` in production. null: never. */
   webDist?: string | null;
+  /** Account deletions: how long to wait for the emails being delivered (tests use a short delay). */
+  account?: DeletionOptions;
 }
 
 export function createApp(opts: AppOptions = {}) {
@@ -126,6 +130,7 @@ export function createApp(opts: AppOptions = {}) {
     coursesRouter,
     affiliatesRouter, // affiliate program: /affiliation/…
     onboardingRouter, // welcome flow + "Bien démarrer" checklist: /onboarding
+    createAccountRouter(opts.account), // Paramètres → Données et compte: /account/summary|export|reset|delete (owner only)
   );
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'Route introuvable' });

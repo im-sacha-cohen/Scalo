@@ -1,11 +1,25 @@
 // Custom contact fields: per-account definitions (custom_fields) and validated values (contacts.fields jsonb).
 //
-// Stored values: text / select → string, number → finite number, date → 'YYYY-MM-DD', checkbox → boolean.
+// Stored values: text / select → string, number → finite number, date → 'YYYY-MM-DD', datetime → ISO 8601 UTC,
+// checkbox → boolean (parsers shared with the web app: shared/src/field-values.ts).
+// A date and time without offset is read in Europe/Paris (DEFAULT_FIELD_TIMEZONE).
 // An empty value (null, '', undefined) removes the key. Keys and types are immutable once created (existing values
 // never need a conversion); labels and select options can change.
 import { sql } from 'kysely';
 import { z } from 'zod';
-import type { ContactFields, CustomField, CustomFieldType, CustomFieldValue } from '@scalo/shared';
+import {
+  DEFAULT_FIELD_TIMEZONE,
+  formatFieldDate,
+  formatFieldDateTime,
+  parseFieldCheckbox,
+  parseFieldDate,
+  parseFieldDateTime,
+  parseFieldNumber,
+  type ContactFields,
+  type CustomField,
+  type CustomFieldType,
+  type CustomFieldValue,
+} from '@scalo/shared';
 import { db, type Db } from '../db';
 import { HttpError } from '../util';
 
@@ -33,21 +47,8 @@ export async function fieldDefMap(userId: number, ex: Db = db): Promise<Map<stri
   return new Map((await listFieldDefs(userId, ex)).map((d) => [d.key, d]));
 }
 
-const TRUE = new Set(['true', '1', 'oui', 'yes', 'on', 'vrai', 'x']);
-const FALSE = new Set(['false', '0', 'non', 'no', 'off', 'faux']);
-
 /** 'YYYY-MM-DD', 'DD/MM/YYYY' (or with '-' / '.') or an ISO datetime → 'YYYY-MM-DD'; null when invalid. */
-export function parseDate(v: string): string | null {
-  const t = v.trim();
-  let y: number, m: number, d: number;
-  let r = /^(\d{4})-(\d{2})-(\d{2})(?:[T ].*)?$/.exec(t);
-  if (r) [y, m, d] = [Number(r[1]), Number(r[2]), Number(r[3])];
-  else if ((r = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(t))) [d, m, y] = [Number(r[1]), Number(r[2]), Number(r[3])];
-  else return null;
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
-  return dt.toISOString().slice(0, 10);
-}
+export const parseDate = parseFieldDate;
 
 /**
  * Normalizes one value for a field definition. Returns `null` for an empty value (= remove the key) and throws a
@@ -65,13 +66,18 @@ export function coerceFieldValue(def: FieldDef, raw: unknown): CustomFieldValue 
       return s;
     }
     case 'number': {
-      const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw.trim().replace(/\s/g, '').replace(',', '.')) : NaN;
-      if (!Number.isFinite(n)) throw bad('nombre attendu');
+      const n = typeof raw === 'number' || typeof raw === 'string' ? parseFieldNumber(raw) : null;
+      if (n === null) throw bad('nombre attendu');
       return n;
     }
     case 'date': {
       const d = typeof raw === 'string' ? parseDate(raw) : null;
       if (!d) throw bad('date attendue (AAAA-MM-JJ ou JJ/MM/AAAA)');
+      return d;
+    }
+    case 'datetime': {
+      const d = typeof raw === 'string' && raw.length <= 60 ? parseFieldDateTime(raw, DEFAULT_FIELD_TIMEZONE) : null;
+      if (!d) throw bad('date et heure attendues (ISO 8601, ex. 2026-10-01T14:30:00+02:00, ou JJ/MM/AAAA HH:mm, heure de Paris)');
       return d;
     }
     case 'select': {
@@ -81,12 +87,9 @@ export function coerceFieldValue(def: FieldDef, raw: unknown): CustomFieldValue 
       return opt;
     }
     case 'checkbox': {
-      if (typeof raw === 'boolean') return raw;
-      if (raw === 1 || raw === 0) return raw === 1;
-      const s = String(raw).trim().toLowerCase();
-      if (TRUE.has(s)) return true;
-      if (FALSE.has(s)) return false;
-      throw bad('oui / non attendu');
+      const b = typeof raw === 'boolean' || typeof raw === 'number' || typeof raw === 'string' ? parseFieldCheckbox(raw) : null;
+      if (b === null) throw bad('oui / non attendu');
+      return b;
     }
   }
 }
@@ -167,14 +170,12 @@ export async function formFieldChanges(
   return hasChanges(c) ? c : null;
 }
 
-/** Text shown for a value (email merge tags, CSV export). */
+/** Text shown for a value (email merge tags, CSV export): date `JJ/MM/AAAA`, date et heure `JJ/MM/AAAA HH:mm` (Paris). */
 export function formatFieldValue(type: CustomFieldType | undefined, v: CustomFieldValue | undefined): string {
   if (v === undefined || v === null) return '';
   if (type === 'checkbox' || typeof v === 'boolean') return v ? 'Oui' : 'Non';
-  if (type === 'date' && typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
-    const [y, m, d] = v.split('-');
-    return `${d}/${m}/${y}`;
-  }
+  if (type === 'date' && typeof v === 'string') return formatFieldDate(v);
+  if (type === 'datetime' && typeof v === 'string') return formatFieldDateTime(v, DEFAULT_FIELD_TIMEZONE);
   return String(v);
 }
 

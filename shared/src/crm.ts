@@ -2,13 +2,14 @@
 
 // ---------- custom fields ----------
 
-export const CUSTOM_FIELD_TYPES = ['text', 'number', 'date', 'select', 'checkbox'] as const;
+export const CUSTOM_FIELD_TYPES = ['text', 'number', 'date', 'datetime', 'select', 'checkbox'] as const;
 export type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number];
 
 export const CUSTOM_FIELD_TYPE_LABELS: Record<CustomFieldType, string> = {
   text: 'Texte',
   number: 'Nombre',
   date: 'Date',
+  datetime: 'Date et heure',
   select: 'Liste de choix',
   checkbox: 'Case à cocher',
 };
@@ -28,7 +29,10 @@ export interface CustomField {
   created_at: string;
 }
 
-/** Stored value: text / select → string, number → number, date → 'YYYY-MM-DD', checkbox → boolean. */
+/**
+ * Stored value: text / select → string, number → number, date → 'YYYY-MM-DD', datetime → ISO 8601 UTC
+ * ('2026-10-01T12:30:00.000Z'), checkbox → boolean. See field-values.ts.
+ */
 export type CustomFieldValue = string | number | boolean;
 export type ContactFields = Record<string, CustomFieldValue>;
 
@@ -38,7 +42,8 @@ export type BuiltinField = (typeof BUILTIN_FIELDS)[number];
 
 // ---------- segments ----------
 
-export type FieldOperator = 'eq' | 'neq' | 'contains' | 'not_contains' | 'gt' | 'lt' | 'empty' | 'not_empty';
+/** `within_days`: date / date et heure in the last N days (value = N). */
+export type FieldOperator = 'eq' | 'neq' | 'contains' | 'not_contains' | 'gt' | 'lt' | 'within_days' | 'empty' | 'not_empty';
 export type SegmentStatus = 'confirmed' | 'pending_confirmation' | 'unsubscribed' | 'bounced';
 
 export type SegmentCondition =

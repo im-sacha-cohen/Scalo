@@ -13,7 +13,7 @@
 // The CSV text and the (encrypted) API key live in the job row only while it is pending / running.
 import crypto from 'node:crypto';
 import { sql } from 'kysely';
-import type { ImportColumnMapping, ImportJob, ImportOptions, ImportPreview, ImportPreviewContact, Tag } from '@scalo/shared';
+import { isValidFieldValue, type ImportColumnMapping, type ImportJob, type ImportOptions, type ImportPreview, type ImportPreviewContact, type Tag } from '@scalo/shared';
 import { db, nowIso, type Db, type ImportJobRow } from '../db';
 import { env } from '../env';
 import { addTag, flagBounce, getOrCreateTag, logEvent, upsertContact } from './contacts';
@@ -86,8 +86,25 @@ export const jobQuery = (userId: number, ex: Db = db) => ex.selectFrom('import_j
 export async function previewRecords(userId: number, records: SourceRecord[], mapping: ImportColumnMapping[], partial: boolean): Promise<ImportPreview> {
   const out: ImportPreview = {
     partial, total: records.length, valid: 0, invalid: 0, empty: 0, duplicates: 0, existing: 0, unsubscribed: 0, bounced: 0, pending: 0,
-    tags: [], new_fields: mapping.filter((m) => m.target === 'field' && m.create).map((m) => m.create!.label), sample: [],
+    tags: [], new_fields: mapping.filter((m) => m.target === 'field' && m.create).map((m) => m.create!.label), invalid_values: [], sample: [],
   };
+  // values a custom field will reject (existing definition, or the field to create)
+  const defs = await fieldDefMap(userId);
+  for (const m of mapping) {
+    if (m.target !== 'field') continue;
+    const def = m.field_key ? defs.get(m.field_key) : m.create ? { label: m.create.label, type: m.create.type, options: m.create.options ?? [] } : undefined;
+    if (!def || def.type === 'text') continue; // text: cut to 1000 characters, never rejected
+    let count = 0;
+    const examples: string[] = [];
+    for (const rec of records) {
+      const raw = rec.values[m.column];
+      const v = (Array.isArray(raw) ? raw.join(', ') : raw ?? '').trim();
+      if (!v || isValidFieldValue(def.type, v, def.options)) continue;
+      count++;
+      if (examples.length < 3 && !examples.includes(v.slice(0, 80))) examples.push(v.slice(0, 80));
+    }
+    if (count) out.invalid_values.push({ column: m.column, field: def.label, count, examples });
+  }
   const seen = new Set<string>();
   const tags = new Map<string, string>();
   const valid: NormalizedContact[] = [];

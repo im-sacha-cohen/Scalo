@@ -180,7 +180,7 @@ export function DashboardPage() {
                 {[
                   { to: '/funnels?new=1', icon: Funnel, title: 'Créer un tunnel', desc: 'Page de capture, vente, remerciement', tone: 'bg-brand-50 text-brand-600' },
                   { to: '/emails?tab=broadcasts&new=1', icon: Megaphone, title: 'Nouvelle newsletter', desc: 'Envoyez un email à vos contacts', tone: 'bg-violet-50 text-violet-600' },
-                  { to: '/contacts?import=1', icon: UserPlus, title: 'Importer des contacts', desc: 'Depuis un fichier CSV', tone: 'bg-emerald-50 text-emerald-600' },
+                  { to: '/migrate?source=csv', icon: UserPlus, title: 'Importer des contacts', desc: 'Depuis un fichier CSV', tone: 'bg-emerald-50 text-emerald-600' },
                 ].map((a) => (
                   <Link key={a.to} to={a.to} className="group flex items-center gap-3 rounded-xl border border-slate-200 p-3 transition-colors hover:border-brand-200 hover:bg-brand-50/40">
                     <span className={cx('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', a.tone)}>

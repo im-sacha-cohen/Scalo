@@ -4,7 +4,7 @@ import { BellOff, Braces, ChevronDown, Tag as TagIcon, Tags, Trash, UserMinus, U
 import type { BulkAction, BulkSelection, CustomField } from '@scalo/shared';
 import { crmApi } from '../../lib/crm-api';
 import type { CrmRefs } from '../../lib/crm-refs';
-import { fmtNumber } from '../../lib/format';
+import { fmtNumber, isoToLocalInput, localInputToIso } from '../../lib/format';
 import { Button, Field, Input, Select } from '../../components/ui';
 import { DropdownMenu } from '../../components/Menu';
 import { Modal } from '../../components/Modal';
@@ -147,6 +147,10 @@ function FieldValueInput({ field, value, onChange }: { field: CustomField | unde
         <option value="false">Non coché</option>
       </Select>
     );
+  }
+  if (field.type === 'datetime') {
+    // typed in the browser's time zone, sent as ISO 8601 UTC
+    return <Input type="datetime-local" value={isoToLocalInput(value)} onChange={(e) => onChange(localInputToIso(e.target.value))} aria-label={field.label} />;
   }
   return (
     <Input

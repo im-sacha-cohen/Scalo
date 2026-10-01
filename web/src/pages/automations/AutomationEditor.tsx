@@ -62,6 +62,7 @@ import { useConfirm } from '../../components/ConfirmDialog';
 import { FilterBuilder, isFilterComplete } from '../../components/FilterBuilder';
 import { useFilterCount } from '../contacts/SegmentsTab';
 import { RunsTable } from './RunsTable';
+import { isoToLocalInput, localInputToIso } from '../../lib/format';
 import { describeAction, describeTrigger } from './labels';
 
 interface Draft {
@@ -951,6 +952,14 @@ function ActionFields({ a, onChange, refs }: { a: AutomationAction; onChange: (a
                 </option>
               ))}
             </Select>
+          ) : f?.type === 'datetime' ? (
+            <Input
+              className="min-w-44 flex-1"
+              type="datetime-local"
+              aria-label={f.label}
+              value={isoToLocalInput(typeof a.value === 'string' ? a.value : '')}
+              onChange={(e) => onChange({ ...a, value: localInputToIso(e.target.value) || null })}
+            />
           ) : (
             <Input
               className="min-w-36 flex-1"

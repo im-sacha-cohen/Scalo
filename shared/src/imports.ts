@@ -29,8 +29,8 @@ export interface ImportColumnMapping {
   target: ImportTarget;
   /** target 'field': key of an existing custom field… */
   field_key?: string;
-  /** …or a field to create when the import starts (confirmed by the user in the mapping step). */
-  create?: { label: string; type: CustomFieldType };
+  /** …or a field to create when the import starts (confirmed by the user in the mapping step). `options`: list field. */
+  create?: { label: string; type: CustomFieldType; options?: string[] };
 }
 
 export interface ImportOptions {
@@ -44,10 +44,29 @@ export interface ImportOptions {
   consent: boolean;
 }
 
+/** Types whose values can be invalid, checked on every value of a column by the analysis. */
+export const IMPORT_CHECKED_TYPES = ['number', 'date', 'datetime', 'checkbox'] as const;
+export type ImportCheckedType = (typeof IMPORT_CHECKED_TYPES)[number];
+
+/** What the analysis read in a column (every row of a CSV file, the first page of the systeme.io API). */
+export interface ImportColumnStats {
+  /** Non-empty values. */
+  filled: number;
+  /** First distinct values (case-insensitive, 100 max): options of a list field, check against an existing list. */
+  distinct: string[];
+  /** More than 100 distinct values. */
+  distinct_more: boolean;
+  /** Values that a field of this type would reject: count + a few examples. */
+  invalid: Record<ImportCheckedType, { count: number; examples: string[] }>;
+  /** Type that fits every value (shown pre-selected when a field is created). */
+  suggested_type: CustomFieldType;
+}
+
 export interface ImportColumn {
   column: string;
   label: string;
   samples: string[];
+  stats?: ImportColumnStats;
 }
 
 export const IMPORT_PRESET_LABELS: Record<string, string> = {
@@ -98,6 +117,8 @@ export interface ImportPreview {
   tags: string[];
   /** Custom fields that will be created. */
   new_fields: string[];
+  /** Custom field columns with values the field will reject (ignored at import, listed in the error journal). */
+  invalid_values: { column: string; field: string; count: number; examples: string[] }[];
   sample: ImportPreviewContact[];
 }
 

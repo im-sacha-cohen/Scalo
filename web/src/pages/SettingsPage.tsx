@@ -15,6 +15,8 @@ import { Sparkles } from 'lucide-react';
 import { AiSettings } from './ai/AiSettingsCard';
 import { CreditCard } from 'lucide-react';
 import { StripeSettings } from './sales/StripeSettingsCard';
+import { DatabaseZap } from 'lucide-react';
+import { AccountDataSection } from './settings/AccountDataSection';
 
 const EMPTY: Settings = {
   sender_name: '',
@@ -32,7 +34,7 @@ const EMPTY: Settings = {
 
 const RATE_PRESETS = [30, 60, 120, 300];
 
-type SectionId = 'expediteur' | 'envoi' | 'domaine' | 'paiements' | 'applications' | 'integrations' | 'ia';
+type SectionId = 'expediteur' | 'envoi' | 'domaine' | 'paiements' | 'applications' | 'integrations' | 'ia' | 'compte';
 const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
   { id: 'expediteur', label: 'Expéditeur & adresse', icon: UserRound },
   { id: 'envoi', label: 'Envoi', icon: Server },
@@ -45,6 +47,8 @@ const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
 // Enterprise edition, when ee/ is installed: license, team, audit log, white label
 const EE_SECTIONS = eeWeb?.settingsSections ?? [];
 for (const s of EE_SECTIONS) SECTIONS.push({ id: s.id as SectionId, label: s.label, icon: s.icon });
+// last: export, deletion of the data, deletion of the account (owner only)
+SECTIONS.push({ id: 'compte', label: 'Données et compte', icon: DatabaseZap });
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, Math.round(Number.isFinite(n) ? n : min)));
 
 export function SettingsPage() {
@@ -140,7 +144,7 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Paramètres" description="Expéditeur, envoi des emails, domaine et applications connectées." />
+      <PageHeader title="Paramètres" description="Expéditeur, envoi des emails, domaine, applications connectées et données du compte." />
 
       <div className="flex flex-col gap-6 lg:flex-row lg:gap-10">
         <nav className="-mx-4 flex shrink-0 gap-1 overflow-x-auto px-4 pb-1 lg:mx-0 lg:w-52 lg:flex-col lg:overflow-visible lg:px-0 lg:pb-0" aria-label="Sections des paramètres">
@@ -348,6 +352,7 @@ export function SettingsPage() {
           {EE_SECTIONS.map((s) => section === (s.id as SectionId) && <s.Component key={s.id} />)}
           {section === 'ia' && <AiSettings />}
           {section === 'paiements' && <StripeSettings />}
+          {section === 'compte' && <AccountDataSection />}
         </div>
       </div>
     </>

@@ -1,14 +1,12 @@
 // « Migrer vers Scalo » : assistant d’import des contacts (systeme.io par clé API, ou fichier CSV exporté d’un autre
 // outil), import d’une page par URL, historique des imports.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import {
   ArrowLeft, ArrowRight, Ban, Check, CircleAlert, CircleCheck, Download, FileSpreadsheet, FileUp, Globe, History, KeyRound, LayoutTemplate, ShieldCheck, Tag as TagIcon, Upload, Users,
 } from 'lucide-react';
-import {
-  CUSTOM_FIELD_TYPE_LABELS, IMPORT_TARGET_LABELS,
-  type CustomField, type CustomFieldType, type ImportAnalysis, type ImportColumnMapping, type ImportJob, type ImportOptions, type ImportPreview, type ImportTarget, type PageImportResult,
-} from '@scalo/shared';
+import type { ImportAnalysis, ImportColumnMapping, ImportJob, ImportOptions, ImportPreview, PageImportResult } from '@scalo/shared';
+import { MappingStep, mappingProblem } from './MappingStep';
 import { api, downloadBlob } from '../../lib/api';
 import { crmApi } from '../../lib/crm-api';
 import { importApi, type ImportSourceInput } from '../../lib/import-api';
@@ -19,7 +17,6 @@ import { useToast } from '../../components/Toast';
 
 type Source = 'systeme_io' | 'csv';
 const STEPS = ['Source', 'Connexion', 'Correspondance', 'Options', 'Aperçu', 'Import', 'Rapport'] as const;
-const CREATE_TYPES: Exclude<CustomFieldType, 'select'>[] = ['text', 'number', 'date', 'checkbox'];
 const STATUS: Record<ImportJob['status'], { label: string; tone: 'slate' | 'brand' | 'green' | 'red' | 'amber' }> = {
   pending: { label: 'En attente', tone: 'slate' },
   running: { label: 'En cours', tone: 'brand' },
@@ -53,7 +50,7 @@ export function MigratePage() {
           { id: 'history', label: 'Historique', icon: History },
         ]}
       />
-      {tab === 'contacts' && <ContactsWizard />}
+      {tab === 'contacts' && <ContactsWizard initialSource={params.get('source') === 'csv' ? 'csv' : null} />}
       {tab === 'page' && <PageImport />}
       {tab === 'history' && <ImportHistory />}
     </>
@@ -83,10 +80,11 @@ function Stepper({ step }: { step: number }) {
   );
 }
 
-function ContactsWizard() {
+/** `initialSource`: « Importer » of the contact list opens the assistant directly on the CSV file step. */
+function ContactsWizard({ initialSource }: { initialSource: Source | null }) {
   const toast = useToast();
-  const [step, setStep] = useState(0);
-  const [source, setSource] = useState<Source>('systeme_io');
+  const [step, setStep] = useState(initialSource ? 1 : 0);
+  const [source, setSource] = useState<Source>(initialSource ?? 'systeme_io');
   const [apiKey, setApiKey] = useState('');
   const [csv, setCsv] = useState('');
   const [fileName, setFileName] = useState<string | null>(null);
@@ -179,7 +177,7 @@ function ContactsWizard() {
     fields.reload();
   };
 
-  const emailMapped = mapping.some((m) => m.target === 'email');
+  const problem = mappingProblem(mapping);
   const nav = (back: number | null, next?: { label: string; onClick: () => void; disabled?: boolean; icon?: typeof ArrowRight }) => (
     <div className="mt-6 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
       {back !== null ? (
@@ -293,9 +291,9 @@ function ContactsWizard() {
               </>
             }
           />
-          <MappingTable analysis={analysis} mapping={mapping} onChange={setMapping} fields={fields.data ?? []} />
-          {!emailMapped && <p className="mt-3 flex items-center gap-1.5 text-sm text-rose-600"><CircleAlert size={15} /> Indiquez la colonne qui contient l’adresse email.</p>}
-          {nav(1, { label: 'Continuer', onClick: () => setStep(3), disabled: !emailMapped })}
+          <MappingStep analysis={analysis} mapping={mapping} onChange={setMapping} fields={fields.data ?? []} />
+          {problem && <p className="mt-3 flex items-center gap-1.5 text-sm text-rose-600"><CircleAlert size={15} /> {problem}</p>}
+          {nav(1, { label: 'Continuer', onClick: () => setStep(3), disabled: !!problem })}
         </>
       )}
 
@@ -383,73 +381,6 @@ function ContactsWizard() {
   );
 }
 
-const SIMPLE_TARGETS: ImportTarget[] = ['ignore', 'email', 'first_name', 'last_name', 'phone', 'tags', 'status', 'unsubscribed', 'bounced', 'created_at'];
-
-function MappingTable({ analysis, mapping, onChange, fields }: { analysis: ImportAnalysis; mapping: ImportColumnMapping[]; onChange: (m: ImportColumnMapping[]) => void; fields: CustomField[] }) {
-  const byColumn = useMemo(() => new Map(mapping.map((m) => [m.column, m])), [mapping]);
-  const set = (column: string, next: ImportColumnMapping) => onChange(mapping.map((m) => (m.column === column ? next : m)));
-  const valueOf = (m: ImportColumnMapping | undefined) => (!m ? 'ignore' : m.target !== 'field' ? m.target : m.field_key ? `field:${m.field_key}` : 'create');
-  const choose = (column: string, label: string, v: string) => {
-    if (v === 'create') set(column, { column, target: 'field', create: { label: label.slice(0, 80), type: 'text' } });
-    else if (v.startsWith('field:')) set(column, { column, target: 'field', field_key: v.slice(6) });
-    else set(column, { column, target: v as ImportTarget });
-  };
-  return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200">
-      <table className="w-full min-w-[640px] text-sm">
-        <thead className="bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
-          <tr>
-            <th className="px-4 py-2.5">Colonne de la source</th>
-            <th className="px-4 py-2.5">Exemples</th>
-            <th className="px-4 py-2.5">Devient dans Scalo</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {analysis.columns.map((c) => {
-            const m = byColumn.get(c.column);
-            return (
-              <tr key={c.column} className={cx(m?.target === 'ignore' && 'text-slate-400')}>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{c.label}</td>
-                <td className="max-w-[240px] truncate px-4 py-2.5 text-slate-500" title={c.samples.join(' · ')}>{c.samples.join(' · ') || '—'}</td>
-                <td className="px-4 py-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Select className="w-64" value={valueOf(m)} onChange={(e) => choose(c.column, c.label, e.target.value)} aria-label={`Destination de la colonne ${c.label}`}>
-                      {SIMPLE_TARGETS.map((t) => (
-                        <option key={t} value={t}>{IMPORT_TARGET_LABELS[t]}</option>
-                      ))}
-                      {fields.length > 0 && (
-                        <optgroup label="Champs personnalisés">
-                          {fields.map((f) => <option key={f.key} value={`field:${f.key}`}>{f.label}</option>)}
-                        </optgroup>
-                      )}
-                      <option value="create">Créer le champ « {c.label.slice(0, 40)} »…</option>
-                    </Select>
-                    {m?.target === 'field' && m.create && (
-                      <>
-                        <Input
-                          className="w-40"
-                          value={m.create.label}
-                          maxLength={80}
-                          aria-label="Nom du nouveau champ"
-                          onChange={(e) => set(c.column, { ...m, create: { ...m.create!, label: e.target.value } })}
-                        />
-                        <Select className="w-36" value={m.create.type} aria-label="Type du nouveau champ" onChange={(e) => set(c.column, { ...m, create: { ...m.create!, type: e.target.value as CustomFieldType } })}>
-                          {CREATE_TYPES.map((t) => <option key={t} value={t}>{CUSTOM_FIELD_TYPE_LABELS[t]}</option>)}
-                        </Select>
-                        <Badge tone="amber">Nouveau champ</Badge>
-                      </>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 function Stat({ label, value, tone = 'slate' }: { label: string; value: number | string; tone?: 'slate' | 'green' | 'brand' | 'amber' | 'red' }) {
   const tones = { slate: 'bg-slate-100 text-slate-700', green: 'bg-emerald-50 text-emerald-700', brand: 'bg-brand-50 text-brand-700', amber: 'bg-amber-50 text-amber-800', red: 'bg-rose-50 text-rose-700' };
   return (
@@ -481,6 +412,11 @@ function PreviewPanel({ preview, options }: { preview: ImportPreview; options: I
         {preview.duplicates > 0 && <li>{fmtNumber(preview.duplicates)} doublon{preview.duplicates > 1 ? 's' : ''} dans la source.</li>}
         {preview.pending > 0 && <li>{fmtNumber(preview.pending)} contact{preview.pending > 1 ? 's' : ''} en attente de confirmation (double opt-in) : importé{preview.pending > 1 ? 's' : ''} non confirmé{preview.pending > 1 ? 's' : ''}.</li>}
         {preview.new_fields.length > 0 && <li>Champs créés : {preview.new_fields.map((f) => `« ${f} »`).join(', ')}.</li>}
+        {(preview.invalid_values ?? []).map((iv) => (
+          <li key={iv.column} className="text-amber-800">
+            Colonne « {iv.column} » → {iv.field} : {fmtNumber(iv.count)} valeur{iv.count > 1 ? 's' : ''} invalide{iv.count > 1 ? 's' : ''} (ex. {iv.examples.map((x) => `« ${x} »`).join(', ')}), ignorée{iv.count > 1 ? 's' : ''} et listée{iv.count > 1 ? 's' : ''} dans le journal.
+          </li>
+        ))}
         {preview.tags.length > 0 && (
           <li className="flex flex-wrap items-center gap-1.5">
             Tags repris : {preview.tags.slice(0, 20).map((t) => <Badge key={t}>{t}</Badge>)}

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { Download, FileUp, Plus, Search, Tag as TagIcon, Tags, Trash, Upload, Users, X, Filter, Braces, Save } from 'lucide-react';
+import { Download, Plus, Search, Tag as TagIcon, Tags, Trash, Upload, Users, X, Filter, Braces, Save } from 'lucide-react';
 import { emptyFilter, type BulkSelection, type Contact, type SegmentFilter, type Tag } from '@scalo/shared';
 import { crmApi } from '../../lib/crm-api';
 import { useCrmRefs } from '../../lib/crm-refs';
@@ -25,7 +25,6 @@ import {
   Select,
   Skeleton,
   Tabs,
-  Textarea,
 } from '../../components/ui';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
@@ -92,7 +91,11 @@ function ContactsTab({ tags, reloadTags }: { tags: Tag[]; reloadTags: () => void
   const status: ContactFilter | '' = STATUS_FILTERS.some((f) => f.id === statusParam) ? (statusParam as ContactFilter) : '';
   const [page, setPage] = useState(1);
   const [addOpen, setAddOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(params.get('import') === '1');
+  // « Importer » opens the import assistant (column mapping, custom fields, preview); old links ?import=1 lead there too
+  const openImport = () => navigate('/migrate?source=csv');
+  useEffect(() => {
+    if (params.get('import') === '1') navigate('/migrate?source=csv', { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [exporting, setExporting] = useState(false);
   // segment (saved) + ad hoc multi-criteria filter
   const segmentId = params.get('segment') ? Number(params.get('segment')) : '';
@@ -194,7 +197,7 @@ function ContactsTab({ tags, reloadTags }: { tags: Tag[]; reloadTags: () => void
             <Button variant="secondary" icon={Download} onClick={exportCsv} loading={exporting}>
               Exporter
             </Button>
-            <Button variant="secondary" icon={Upload} onClick={() => setImportOpen(true)}>
+            <Button variant="secondary" icon={Upload} onClick={openImport}>
               Importer
             </Button>
             <Button variant="secondary" onClick={() => navigate('/migrate')}>
@@ -260,7 +263,7 @@ function ContactsTab({ tags, reloadTags }: { tags: Tag[]; reloadTags: () => void
           description="Ajoutez vos premiers contacts manuellement, importez un fichier CSV, ou publiez une page de capture."
           action={
             <div className="flex gap-2">
-              <Button variant="secondary" icon={Upload} onClick={() => setImportOpen(true)}>
+              <Button variant="secondary" icon={Upload} onClick={openImport}>
                 Importer un CSV
               </Button>
               <Button icon={Plus} onClick={() => setAddOpen(true)}>
@@ -358,22 +361,6 @@ function ContactsTab({ tags, reloadTags }: { tags: Tag[]; reloadTags: () => void
           reload();
           reloadTags();
           navigate(`/contacts/${c.id}`);
-        }}
-      />
-      <ImportModal
-        open={importOpen}
-        tags={tags}
-        onClose={() => {
-          setImportOpen(false);
-          if (params.get('import')) {
-            const p = new URLSearchParams(params);
-            p.delete('import');
-            setParams(p, { replace: true });
-          }
-        }}
-        onDone={() => {
-          reload();
-          reloadTags();
         }}
       />
       <SegmentModal
@@ -556,124 +543,6 @@ function AddContactModal({ open, onClose, onCreated, tags }: { open: boolean; on
           <TagInput value={tagList} onChange={setTagList} tags={tags} />
         </Field>
       </form>
-    </Modal>
-  );
-}
-
-function ImportModal({ open, onClose, onDone, tags }: { open: boolean; onClose: () => void; onDone: () => void; tags: Tag[] }) {
-  const toast = useToast();
-  const [csv, setCsv] = useState('');
-  const [fileName, setFileName] = useState<string | null>(null);
-  const [tag, setTag] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [result, setResult] = useState<{ created: number; updated: number; skipped: number } | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (open) {
-      setCsv('');
-      setFileName(null);
-      setTag('');
-      setResult(null);
-    }
-  }, [open]);
-
-  const onFile = async (file: File | undefined) => {
-    if (!file) return;
-    setCsv(await file.text());
-    setFileName(file.name);
-  };
-
-  const lines = csv.trim() ? csv.trim().split(/\r?\n/).length - 1 : 0;
-
-  const submit = async () => {
-    setSaving(true);
-    try {
-      const r = await api.importContacts({ csv, tag: tag.trim() || undefined });
-      setResult(r);
-      onDone();
-      toast.success(`Import terminé : ${r.created} créé(s), ${r.updated} mis à jour`);
-    } catch (err) {
-      toast.error(err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      size="lg"
-      title="Importer des contacts"
-      description="Fichier CSV avec une ligne d’en-tête. Colonne email obligatoire ; first_name/prenom, last_name/nom, phone/telephone facultatives ; les autres colonnes sont associées à vos champs personnalisés par clé ou par libellé. Séparateur , ou ;"
-      footer={
-        result ? (
-          <Button onClick={onClose}>Terminer</Button>
-        ) : (
-          <>
-            <Button variant="secondary" onClick={onClose}>
-              Annuler
-            </Button>
-            <Button icon={Upload} onClick={submit} loading={saving} disabled={!csv.trim()}>
-              Importer{lines > 0 ? ` ${fmtNumber(lines)} ligne${lines > 1 ? 's' : ''}` : ''}
-            </Button>
-          </>
-        )
-      }
-    >
-      {result ? (
-        <div className="grid grid-cols-3 gap-3 text-center">
-          {[
-            ['Créés', result.created, 'text-emerald-600 bg-emerald-50'],
-            ['Mis à jour', result.updated, 'text-brand-600 bg-brand-50'],
-            ['Ignorés', result.skipped, 'text-slate-600 bg-slate-100'],
-          ].map(([l, v, c]) => (
-            <div key={l as string} className={`rounded-xl p-4 ${c}`}>
-              <p className="text-3xl font-bold">{fmtNumber(v as number)}</p>
-              <p className="mt-1 text-sm font-medium">{l}</p>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              onFile(e.dataTransfer.files[0]);
-            }}
-            className="flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 px-6 py-8 text-center transition-colors hover:border-brand-400 hover:bg-brand-50/40"
-          >
-            <FileUp size={28} className="mb-2 text-brand-500" />
-            <span className="text-sm font-semibold text-slate-800">{fileName ?? 'Choisir un fichier CSV'}</span>
-            <span className="mt-1 text-xs text-slate-500">ou glissez-le ici — vous pouvez aussi coller le contenu ci-dessous</span>
-          </button>
-          <input ref={fileRef} type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
-          <Field label="Contenu CSV">
-            <Textarea
-              rows={7}
-              className="font-mono text-xs"
-              value={csv}
-              onChange={(e) => {
-                setCsv(e.target.value);
-                setFileName(null);
-              }}
-              placeholder={'email,prenom,nom\nmarie@exemple.com,Marie,Dupont\njean@exemple.com,Jean,Martin'}
-            />
-          </Field>
-          <Field label="Ajouter un tag aux contacts importés (facultatif)">
-            <Input list="import-tags" icon={TagIcon} value={tag} onChange={(e) => setTag(e.target.value)} placeholder="ex. webinar-mars" />
-            <datalist id="import-tags">
-              {tags.map((t) => (
-                <option key={t.id} value={t.name} />
-              ))}
-            </datalist>
-          </Field>
-        </div>
-      )}
     </Modal>
   );
 }

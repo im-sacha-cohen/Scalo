@@ -6,6 +6,7 @@ import {
   type AutomationTrigger,
 } from '@scalo/shared';
 import type { CrmRefs } from '../../lib/crm-refs';
+import { fmtFieldDateTime } from '../../lib/format';
 
 const name = <T extends { id: number }>(list: T[], id: number | null | undefined, get: (x: T) => string, fallback: string) =>
   id ? (list.find((x) => x.id === id) ? get(list.find((x) => x.id === id)!) : `${fallback} #${id}`) : null;
@@ -52,7 +53,8 @@ export function describeAction(a: AutomationAction, refs: CrmRefs): string {
       return `${base} « ${name(refs.campaigns, a.campaign_id, (x) => x.name, 'campagne') ?? '?'} »`;
     case 'set_field': {
       const f = refs.fields.find((x) => x.key === a.key);
-      return `${f?.label ?? a.key} = ${a.value === null || a.value === '' ? '(vide)' : typeof a.value === 'boolean' ? (a.value ? 'oui' : 'non') : a.value}`;
+      const shown = f?.type === 'datetime' && typeof a.value === 'string' && a.value ? fmtFieldDateTime(a.value) : a.value;
+      return `${f?.label ?? a.key} = ${a.value === null || a.value === '' ? '(vide)' : typeof a.value === 'boolean' ? (a.value ? 'oui' : 'non') : shown}`;
     }
     case 'webhook':
       try {

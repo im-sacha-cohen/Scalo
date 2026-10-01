@@ -64,7 +64,10 @@ describe('welcome flow', () => {
   test('accounts that exist when the migration runs are never sent to the welcome flow', async () => {
     await migrator().migrateTo('0012_affiliates');
     const old = await account(); // created before 0013: no onboarding table yet
-    assert.equal(await migrateToLatest(db, { quiet: true }), 1);
+    // 0013 and the migrations added after it
+    const later = (await migrator().getMigrations()).filter((m) => m.name > '0012_affiliates').length;
+    assert.ok(later >= 1);
+    assert.equal(await migrateToLatest(db, { quiet: true }), later);
     const s = await state(old.api);
     assert.equal(s.required, false);
     assert.ok(s.completed_at);

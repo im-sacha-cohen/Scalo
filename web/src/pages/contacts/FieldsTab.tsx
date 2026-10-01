@@ -80,7 +80,14 @@ export function FieldsTab() {
           <Field label="Libellé">
             <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="ex. Entreprise" required maxLength={80} />
           </Field>
-          <Field label="Type">
+          <Field
+            label="Type"
+            hint={
+              type === 'datetime'
+                ? 'Saisie et affichage dans votre fuseau horaire ; enregistrée en UTC. Import CSV, formulaires et API sans fuseau : heure de Paris (JJ/MM/AAAA HH:mm accepté).'
+                : undefined
+            }
+          >
             <Select value={type} onChange={(e) => setType(e.target.value as CustomFieldType)}>
               {CUSTOM_FIELD_TYPES.map((t) => (
                 <option key={t} value={t}>

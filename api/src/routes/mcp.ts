@@ -44,7 +44,12 @@ const contactFields = {
   first_name: z.string().max(200).optional(),
   last_name: z.string().max(200).optional(),
   phone: z.string().max(200).optional(),
-  fields: z.record(z.string(), z.unknown()).optional().describe('Champs personnalisés {clé: valeur}'),
+  fields: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe(
+      'Champs personnalisés {clé: valeur} (voir list_custom_fields ; null vide un champ). Date : AAAA-MM-JJ. Date et heure : ISO 8601 avec fuseau (2026-10-01T14:30:00+02:00), sinon heure de Paris. Case à cocher : true / false.',
+    ),
 };
 
 /** Tools = endpoints of the public API v1 (see routes/v1.ts, routes/v1-crm.ts). */
@@ -83,6 +88,15 @@ export const MCP_TOOLS: ToolDef[] = [
     readOnly: false,
     input: { contact_id: id('Identifiant du contact'), email: z.string().max(254).optional(), ...contactFields, unsubscribed: z.boolean().optional() },
     call: ({ contact_id, ...body }) => ({ method: 'PATCH', path: `/contacts/${contact_id}`, body }),
+  },
+  {
+    name: 'list_custom_fields',
+    title: 'Champs personnalisés',
+    description: 'Champs personnalisés du compte : clé (à utiliser dans `fields`), libellé, type (texte, nombre, date, date et heure — ISO 8601 UTC —, liste, case à cocher) et options des listes.',
+    scope: 'contacts:read',
+    readOnly: true,
+    input: {},
+    call: () => ({ method: 'GET', path: '/custom-fields' }),
   },
   { name: 'list_tags', title: 'Lister les tags', description: 'Tags du compte avec le nombre de contacts.', scope: 'contacts:read', readOnly: true, input: {}, call: () => ({ method: 'GET', path: '/tags' }) },
   {
