@@ -143,8 +143,20 @@ async function get(apiKey: string, path: string, params: Record<string, string |
     throw new SioError('rate_limit', 'Limite de débit de systeme.io atteinte', waitFromHeaders(res.headers), 429);
   }
   if (res.status === 401 || res.status === 403) {
-    await res.body?.cancel().catch(() => undefined);
-    throw new SioError('auth', 'Clé API systeme.io refusée. Vérifiez la clé (Paramètres → Clés API publiques dans systeme.io).', null, res.status);
+    // systeme.io answers with an RFC 7807 body whose `detail` explains the refusal (it never echoes the key)
+    const detail = await res
+      .json()
+      .then((b: unknown) => (b && typeof b === 'object' && typeof (b as { detail?: unknown }).detail === 'string' ? (b as { detail: string }).detail.slice(0, 200) : ''))
+      .catch(() => '');
+    const why = detail ? ` Réponse de systeme.io : « ${detail} »` : '';
+    throw new SioError(
+      'auth',
+      res.status === 401
+        ? `Clé API systeme.io refusée (HTTP 401).${why} Vérifiez que la clé a été copiée en entier, sans espace.`
+        : `systeme.io refuse l’accès avec cette clé (HTTP 403).${why} Vérifiez que votre offre systeme.io donne accès à l’API publique.`,
+      null,
+      res.status,
+    );
   }
   if (!res.ok) {
     await res.body?.cancel().catch(() => undefined);
