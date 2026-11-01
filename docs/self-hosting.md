@@ -92,6 +92,32 @@ docker compose -f docker-compose.prod.yml up -d
 
 (`… src/migrate-cli.ts status` liste les migrations appliquées.)
 
+## Image seule (Dokploy, Coolify, reverse proxy existant)
+
+L’image peut tourner seule, base de données comprise. Il ne faut que deux choses : la variable `PUBLIC_URL` et un volume persistant sur `/data`.
+
+```bash
+docker build -t scalo .
+docker run -d -p 127.0.0.1:4000:4000 -v scalo:/data -e PUBLIC_URL=https://app.exemple.fr scalo
+```
+
+Le reste est automatique : migrations au démarrage, `TRUST_PROXY=1`, et, si la variable correspondante n’est pas définie :
+
+- `JWT_SECRET` est généré une seule fois et conservé dans `/data/secrets.env` ;
+- sans `DATABASE_URL`, PostgreSQL 16 tourne dans le conteneur, joignable seulement de l’intérieur, avec ses données dans `/data/postgres`.
+
+**Sans volume sur `/data`, la base et les secrets sont perdus à chaque recréation du conteneur, donc à chaque déploiement.**
+
+Dans Dokploy : application GitHub, type de build `Dockerfile`, `PUBLIC_URL` dans Environment, le domaine avec le port `4000` et HTTPS dans Domains, un volume monté sur `/data` dans Advanced → Volumes.
+
+Un dump de la base est écrit chaque jour dans `/data/backups` et conservé 7 jours. Il est sur le même volume que la base : copiez-le hors du serveur. `/data/secrets.env` est à sauvegarder aussi, sans lui les clés (Stripe, IA) stockées chiffrées sont illisibles. Pour restaurer (les scripts `backup.sh` et `restore.sh` ne visent que le déploiement Compose) :
+
+```bash
+docker exec <conteneur> sh -c '. /data/secrets.env; PGPASSWORD=$POSTGRES_PASSWORD pg_restore -h 127.0.0.1 -U scalo -d scalo --clean --if-exists --no-owner /data/backups/scalo-<date>.dump'
+```
+
+Les certificats à la demande des domaines personnalisés sont assurés par Caddy (`docker-compose.prod.yml`) : avec un autre proxy, chaque domaine personnalisé doit y être déclaré. Le port 4000 ne doit pas être publié sur Internet : avec `TRUST_PROXY=1`, l’application fait confiance à l’en-tête `X-Forwarded-For` du proxy placé devant elle. Pour une montée en charge ou des sauvegardes plus fines, préférez une base séparée (`DATABASE_URL`).
+
 ## Variantes
 
 **Essai en local.** `SCALO_DOMAIN=localhost`, `SCALO_HTTP_PORT=8080`, `SCALO_HTTPS_PORT=8443` dans `.env` : Caddy sert `https://localhost:8443` avec un certificat auto-signé (avertissement du navigateur attendu).
