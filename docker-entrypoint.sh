@@ -62,7 +62,10 @@ if [ ! -s "$PGDATA/PG_VERSION" ]; then
   initdb -D "$PGDATA" -U "$PGUSER" --pwfile="$pwfile" --auth=scram-sha-256 --encoding=UTF8 --locale=C.UTF-8 >/dev/null
   rm -f "$pwfile"
 fi
-pg_ctl -D "$PGDATA" -w -t 120 start -o "-c listen_addresses=127.0.0.1 -c unix_socket_directories=''" >/dev/null
+# We hold the lock: a pid file left by a container that was killed is stale, and its pid may now be another process here.
+rm -f "$PGDATA/postmaster.pid"
+# pg_ctl sends the server's output to its own stdout: keep it, it is the only trace of a database that won't start
+pg_ctl -D "$PGDATA" -w -t 120 start -o "-c listen_addresses=127.0.0.1 -c unix_socket_directories=''"
 psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'scalo'" | grep -q 1 || createdb scalo
 
 # One dump per day, kept 7 days. The check is hourly so that frequent redeployments cannot postpone it forever.
