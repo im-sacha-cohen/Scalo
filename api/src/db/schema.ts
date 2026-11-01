@@ -253,8 +253,8 @@ export interface OAuthClientsTable {
   id: Id;
   /** Public identifier (`scalo_app_…`). */
   client_id: string;
-  /** Owner (developer) of the application. */
-  user_id: number;
+  /** Owner (developer) of the application; null for a client registered by itself (POST /oauth/register). */
+  user_id: number | null;
   name: string;
   description: Default<string>;
   website: string | null;

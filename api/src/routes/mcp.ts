@@ -4,8 +4,8 @@
 //   GET  /.well-known/oauth-protected-resource    RFC 9728 metadata: tells the client which authorization server to use
 //
 // Authentication: the OAuth 2.0 access tokens of the existing authorization server (`Authorization: Bearer scalo_at_…`),
-// same scopes as the public API. No dynamic client registration: the user creates an application in "Développeurs" and
-// gives its client id (and secret) to the MCP client.
+// same scopes as the public API. Claude and local tools only need the URL: they discover the authorization server and
+// register themselves (POST /oauth/register). Any other client uses an application created in "Développeurs".
 //
 // Each tool is a thin wrapper around one /api/v1 endpoint, called in-process over the loopback interface with the
 // caller's own token: validation, scope checks, account isolation, rate limit and business rules are exactly those of

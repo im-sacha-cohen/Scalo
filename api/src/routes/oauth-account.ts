@@ -34,7 +34,7 @@ async function findRequest(rawId: unknown) {
   const row = await db
     .selectFrom('oauth_authorization_requests as r')
     .innerJoin('oauth_clients as c', 'c.id', 'r.client_id')
-    .innerJoin('users as o', 'o.id', 'c.user_id')
+    .leftJoin('users as o', 'o.id', 'c.user_id')
     .select([
       'r.id_hash',
       'r.client_id',
@@ -143,7 +143,7 @@ oauthAccountRouter.get('/oauth/authorizations', async (req, res) => {
   const rows = await db
     .selectFrom('oauth_consents as g')
     .innerJoin('oauth_clients as c', 'c.id', 'g.client_id')
-    .innerJoin('users as o', 'o.id', 'c.user_id')
+    .leftJoin('users as o', 'o.id', 'c.user_id')
     .select(['g.scopes', 'g.created_at', 'g.updated_at', 'g.last_used_at', 'c.client_id', 'c.name', 'c.description', 'c.website', 'c.logo_url', 'o.name as owner_name'])
     .where('g.user_id', '=', uid(req))
     .orderBy('g.updated_at', 'desc')

@@ -6,8 +6,6 @@ import { CodeBlock, CopyValue } from '../oauth/common';
 
 const ORIGIN = window.location.origin;
 export const MCP_URL = `${ORIGIN}/mcp`;
-/** Redirect URI of Claude's connectors (claude.ai, Claude Desktop). */
-export const CLAUDE_CALLBACK = 'https://claude.ai/api/mcp/auth_callback';
 
 const TOOLS: [string, string, OAuthScope][] = [
   ['get_account', 'Compte connecté', 'profile'],
@@ -35,24 +33,21 @@ export function McpDocs() {
         </div>
 
         <section>
-          <h4 className="font-semibold text-slate-900">1. Créez une application</h4>
-          <p className="mt-1.5">
-            Cliquez sur « Nouvelle application » ci-dessus : type <strong>Confidentielle</strong>, les scopes que vous souhaitez donner à Claude (plus <span className={code}>offline_access</span>{' '}
-            pour rester connecté), et cette adresse de redirection :
-          </p>
-          <CopyValue className="mt-2" value={CLAUDE_CALLBACK} />
-          <p className="mt-2 text-xs text-slate-500">Conservez le client_id et le client_secret affichés à la création. Pas d’enregistrement dynamique de client : seules vos applications peuvent se connecter.</p>
+          <h4 className="font-semibold text-slate-900">1. Ajoutez le connecteur dans Claude</h4>
+          <ol className="mt-1.5 list-decimal space-y-1 pl-5">
+            <li>Dans Claude : Paramètres → Connecteurs → « Ajouter un connecteur personnalisé ».</li>
+            <li>Collez l’URL du serveur MCP, sans rien d’autre.</li>
+            <li>Claude ouvre l’écran d’autorisation Scalo : connectez-vous et acceptez. Vous pouvez révoquer l’accès à tout moment dans Paramètres → Applications connectées.</li>
+          </ol>
+          <p className="mt-3 text-xs font-medium text-slate-500">Claude Code</p>
+          <CodeBlock className="mt-1.5" code={`claude mcp add --transport http scalo ${MCP_URL}`} />
         </section>
 
         <section>
-          <h4 className="font-semibold text-slate-900">2. Ajoutez le connecteur dans Claude</h4>
-          <ol className="mt-1.5 list-decimal space-y-1 pl-5">
-            <li>Dans Claude : Paramètres → Connecteurs → « Ajouter un connecteur personnalisé ».</li>
-            <li>Collez l’URL du serveur MCP, puis dans les paramètres avancés le client_id et le client_secret de votre application.</li>
-            <li>Claude ouvre l’écran d’autorisation Scalo : connectez-vous et acceptez. Vous pouvez révoquer l’accès à tout moment dans Paramètres → Applications connectées.</li>
-          </ol>
-          <p className="mt-3 text-xs font-medium text-slate-500">Claude Code (ajoutez aussi http://localhost:8765/callback aux adresses de redirection de l’application)</p>
-          <CodeBlock className="mt-1.5" code={`claude mcp add --transport http scalo ${MCP_URL} \\\n  --client-id scalo_app_… --client-secret --callback-port 8765`} />
+          <h4 className="font-semibold text-slate-900">2. Autres clients MCP : créez une application</h4>
+          <p className="mt-1.5">
+            Claude et les outils locaux s’enregistrent tout seuls. Un autre client hébergé a besoin d’une application : « Nouvelle application » ci-dessus, avec l’adresse de redirection de ce client et les scopes à lui donner (plus <span className={code}>offline_access</span> pour rester connecté).
+          </p>
         </section>
 
         <section>

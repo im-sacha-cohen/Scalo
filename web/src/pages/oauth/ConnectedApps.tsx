@@ -73,7 +73,7 @@ export function ConnectedAppsCard() {
                   )}
                 </p>
                 <p className="text-xs text-slate-500">
-                  Par {a.client.owner_name} · autorisée le {fmtDate(a.granted_at)} · {a.last_used_at ? `utilisée ${fmtRelative(a.last_used_at)}` : 'jamais utilisée'}
+                  {a.client.owner_name && `Par ${a.client.owner_name} · `}autorisée le {fmtDate(a.granted_at)} · {a.last_used_at ? `utilisée ${fmtRelative(a.last_used_at)}` : 'jamais utilisée'}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {a.scopes.map((s) => (

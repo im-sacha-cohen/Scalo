@@ -1,5 +1,6 @@
 // MCP server: Streamable HTTP on POST /mcp, authenticated with the OAuth access tokens of the authorization server.
 // End to end with the official MCP client against the real app + PostgreSQL.
+import { createHash } from 'node:crypto';
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -7,6 +8,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { db } from '../src/db';
 import { env } from '../src/env';
 import { MCP_TOOLS } from '../src/routes/mcp';
+import { cleanupOAuth } from '../src/services/oauth-server';
 import { client, http, registerUser, shutdown, startApp, type TestCtx } from './helpers';
 
 let ctx: TestCtx;
@@ -59,6 +61,95 @@ async function call(c: Client, name: string, args: Record<string, unknown> = {})
 const INIT = { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '1' } } };
 const rawPost = (headers: Record<string, string>) =>
   fetch(`${ctx.base}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...headers }, body: JSON.stringify(INIT) });
+
+const VERIFIER = 'a'.repeat(50);
+const CHALLENGE = createHash('sha256').update(VERIFIER).digest('base64url');
+const register = (metadata: Record<string, unknown>) => http(ctx, 'POST', '/oauth/register', { json: metadata });
+
+test('Claude connects with the URL alone: discovery, registration, consent, token, tools', async () => {
+  const resource = await http(ctx, 'GET', '/.well-known/oauth-protected-resource/mcp');
+  const as = await http(ctx, 'GET', '/.well-known/oauth-authorization-server');
+  assert.equal(as.body.issuer, resource.body.authorization_servers[0]);
+  assert.equal(as.body.registration_endpoint, `${env.PUBLIC_URL}/oauth/register`);
+
+  const reg = await register({ client_name: 'Un autre nom', redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none' });
+  assert.equal(reg.status, 201, reg.text);
+  assert.equal(reg.body.client_name, 'Claude', 'a remote callback cannot choose its name');
+  assert.equal(reg.body.client_secret, undefined);
+
+  const u = await registerUser(ctx);
+  const api = client(ctx, u.token);
+  // no scope: everything is proposed on the consent screen
+  const q = new URLSearchParams({ response_type: 'code', client_id: reg.body.client_id, redirect_uri: REDIRECT, code_challenge: CHALLENGE, code_challenge_method: 'S256' });
+  const a = await http(ctx, 'GET', `/oauth/authorize?${q}`);
+  assert.equal(a.status, 302, a.text);
+  const requestId = new URL(a.headers.get('location')!).searchParams.get('request')!;
+  const shown = await api.get(`/api/oauth/requests/${requestId}`);
+  assert.equal(shown.status, 200, shown.text);
+  assert.deepEqual([shown.body.client.name, shown.body.client.owner_name], ['Claude', null]);
+  assert.ok(shown.body.scopes.includes('contacts:write') && shown.body.scopes.includes('offline_access'));
+
+  const consent = await api.post('/api/oauth/consent', { request_id: requestId, decision: 'approve' });
+  const code = new URL(consent.body.redirect_to).searchParams.get('code')!;
+  const tok = await http(ctx, 'POST', '/oauth/token', { form: { grant_type: 'authorization_code', code, redirect_uri: REDIRECT, client_id: reg.body.client_id, code_verifier: VERIFIER } });
+  assert.equal(tok.status, 200, tok.text);
+  assert.ok(tok.body.refresh_token, 'stays connected');
+  assert.equal((await call(await mcp(tok.body.access_token), 'get_account')).email, u.email);
+
+  const connected = await api.get('/api/oauth/authorizations');
+  assert.deepEqual(connected.body.map((x: any) => x.client.name), ['Claude']);
+  // the client belongs to no account: it is in nobody's list of developer applications
+  assert.deepEqual((await api.get('/api/developer/apps')).body, []);
+});
+
+test('registration: any other address is refused, so a look-alike application cannot collect a grant', async () => {
+  for (const uri of ['https://evil.example/callback', 'https://claude.ai.evil.example/api/mcp/auth_callback', 'https://claude.ai/autre', 'http://evil.example/cb', 'com.evil.app:/cb', 'javascript:alert(1)']) {
+    const r = await register({ client_name: 'Claude', redirect_uris: [uri] });
+    assert.equal(r.status, 400, uri);
+    assert.equal(r.body.error, 'invalid_redirect_uri', uri);
+  }
+  for (const body of [{}, { redirect_uris: [] }, { redirect_uris: 'x' }, { redirect_uris: [1] }]) {
+    assert.equal((await register(body)).body.error, 'invalid_redirect_uri');
+  }
+  assert.equal((await register({ redirect_uris: [REDIRECT], token_endpoint_auth_method: 'private_key_jwt' })).body.error, 'invalid_client_metadata');
+  const mixed = await register({ redirect_uris: [REDIRECT, 'https://evil.example/cb'] });
+  assert.equal(mixed.status, 400);
+});
+
+test('registration: local tools name themselves, a confidential client gets its secret once, PKCE is mandatory', async () => {
+  const local = await register({ client_name: 'Claude Code', redirect_uris: ['http://localhost:8765/callback'], token_endpoint_auth_method: 'none' });
+  assert.equal(local.status, 201, local.text);
+  assert.equal(local.body.client_name, 'Claude Code');
+
+  const conf = await register({ redirect_uris: [REDIRECT] });
+  assert.equal(conf.status, 201, conf.text);
+  assert.equal(conf.body.token_endpoint_auth_method, 'client_secret_basic');
+  assert.ok(conf.body.client_secret.startsWith('scalo_cs_'));
+  const row = await db.selectFrom('oauth_clients').selectAll().where('client_id', '=', conf.body.client_id).executeTakeFirstOrThrow();
+  assert.notEqual(row.secret_hash, conf.body.client_secret);
+
+  const q = new URLSearchParams({ response_type: 'code', client_id: conf.body.client_id, redirect_uri: REDIRECT, scope: 'profile' });
+  const a = await http(ctx, 'GET', `/oauth/authorize?${q}`);
+  assert.equal(a.status, 302);
+  assert.equal(new URL(a.headers.get('location')!).searchParams.get('error'), 'invalid_request', 'even with a secret');
+});
+
+test('registration is rate limited, and clients nobody authorized are cleaned up', async () => {
+  await db.deleteFrom('auth_attempts').execute();
+  let last = 0;
+  for (let i = 0; i < 31; i++) last = (await register({ redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none' })).status;
+  assert.equal(last, 429);
+
+  const old = new Date(Date.now() - 2 * 86_400_000);
+  const u = await registerUser(ctx);
+  await db.updateTable('oauth_clients').set({ created_at: old as never }).where('user_id', 'is', null).execute();
+  await db.deleteFrom('oauth_consents').execute(); // those of the previous tests
+  const kept = await db.selectFrom('oauth_clients').select('id').where('user_id', 'is', null).executeTakeFirstOrThrow();
+  await db.insertInto('oauth_consents').values({ user_id: u.user.id, client_id: kept.id, scopes: ['profile'] }).execute();
+  await cleanupOAuth();
+  const left = await db.selectFrom('oauth_clients').select('id').where('user_id', 'is', null).execute();
+  assert.deepEqual(left.map((c) => c.id), [kept.id]);
+});
 
 test('protected resource metadata (RFC 9728) points to the authorization server', async () => {
   for (const path of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp']) {

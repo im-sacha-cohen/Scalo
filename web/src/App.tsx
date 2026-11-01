@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation } from 'react-router';
+import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation, useSearchParams } from 'react-router';
 import { AuthProvider, useAuth } from './lib/auth';
 import { EditionProvider } from './lib/edition';
 import { eeWeb } from './lib/ee';
@@ -6,7 +6,7 @@ import { ToastProvider } from './components/Toast';
 import { ConfirmProvider } from './components/ConfirmDialog';
 import { Layout } from './components/Layout';
 import { Spinner } from './components/ui';
-import { LoginPage, RegisterPage } from './pages/AuthPages';
+import { LoginPage, RegisterPage, safeNext } from './pages/AuthPages';
 import { DashboardPage } from './pages/Dashboard';
 import { ContactsPage } from './pages/contacts/ContactsPage';
 import { ContactDetailPage } from './pages/contacts/ContactDetail';
@@ -55,8 +55,10 @@ function RequireAuth() {
 
 function GuestOnly() {
   const { user, loading } = useAuth();
+  const [params] = useSearchParams();
   if (loading) return <FullScreenLoader />;
-  if (user) return <Navigate to="/dashboard" replace />;
+  // renders as soon as the login sets the user, before the login page navigates: `next` must be honored here too
+  if (user) return <Navigate to={safeNext(params.get('next')) ?? '/dashboard'} replace />;
   return <Outlet />;
 }
 

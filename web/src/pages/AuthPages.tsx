@@ -6,7 +6,7 @@ import { Button, Field, Input } from '../components/ui';
 import { Logo } from '../components/Layout';
 
 /** Same-origin relative path only (open-redirect safe). */
-const safeNext = (next: string | null) => (next && next.startsWith('/') && !next.startsWith('//') && !next.includes('\\') ? next : null);
+export const safeNext = (next: string | null) => (next && next.startsWith('/') && !next.startsWith('//') && !next.includes('\\') ? next : null);
 /** Keeps `?next=` when switching between login and register (e.g. coming from an OAuth consent screen). */
 const withNext = (path: string, next: string | null) => (next ? `${path}?next=${encodeURIComponent(next)}` : path);
 

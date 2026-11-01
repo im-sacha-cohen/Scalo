@@ -74,7 +74,7 @@ export interface OAuthConsentRequest {
     website: string | null;
     logo_url: string | null;
     type: OAuthClientType;
-    owner_name: string;
+    owner_name: string | null;
   };
   scopes: OAuthScope[];
   redirect_uri: string;
@@ -86,7 +86,7 @@ export interface OAuthConsentRequest {
 
 /** "Applications connectées": an application the user authorized. */
 export interface OAuthAuthorization {
-  client: { client_id: string; name: string; description: string; website: string | null; logo_url: string | null; owner_name: string };
+  client: { client_id: string; name: string; description: string; website: string | null; logo_url: string | null; owner_name: string | null };
   scopes: OAuthScope[];
   granted_at: string;
   updated_at: string;

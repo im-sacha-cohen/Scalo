@@ -98,6 +98,31 @@ export function redirectUriError(raw: string): string | null {
   return null;
 }
 
+/** Claude's connector callbacks (claude.ai, Claude Desktop). */
+const CLAUDE_CALLBACKS = ['https://claude.ai/api/mcp/auth_callback', 'https://claude.com/api/mcp/auth_callback'];
+
+/**
+ * Redirect URIs a client may register by itself (POST /oauth/register). Registration is anonymous: with any https
+ * address accepted, anyone could send a user to the consent screen of a look-alike application and collect a grant
+ * on their own server. So only Claude's callbacks and loopback addresses (Claude Code, local tools) are allowed;
+ * any other client goes through an application created in Développeurs.
+ */
+export function selfRegisteredRedirectError(raw: string): string | null {
+  if (CLAUDE_CALLBACKS.includes(raw)) return null;
+  const err = redirectUriError(raw);
+  if (err) return err;
+  const u = new URL(raw);
+  if (u.protocol === 'http:' && LOOPBACK.has(u.hostname)) return null;
+  return 'Seules les adresses de Claude et localhost peuvent s’enregistrer automatiquement : créez une application dans Développeurs';
+}
+
+/** Name shown on the consent screen: a remote callback can only be Claude, a local tool names itself. */
+export function selfRegisteredName(redirectUris: string[], clientName: unknown): string {
+  if (redirectUris.every((u) => CLAUDE_CALLBACKS.includes(u))) return 'Claude';
+  const name = typeof clientName === 'string' ? clientName.trim().slice(0, 80) : '';
+  return name || 'Application locale';
+}
+
 /** Appends parameters to a (validated, registered) redirect URI, keeping its own query string. */
 export function withParams(redirectUri: string, params: Record<string, string | null | undefined>): string {
   const u = new URL(redirectUri);
@@ -202,4 +227,11 @@ export async function cleanupOAuth() {
   await db.deleteFrom('oauth_codes').where('expires_at', '<', dayAgo).execute();
   // rotated refresh tokens are kept until they expire: presenting one again is detected as a reuse
   await db.deleteFrom('oauth_tokens').where('expires_at', '<', dayAgo).execute();
+  // anyone can register a client: those nobody authorized must not pile up
+  await db
+    .deleteFrom('oauth_clients')
+    .where('user_id', 'is', null)
+    .where('created_at', '<', dayAgo)
+    .where(({ not, exists, selectFrom }) => not(exists(selectFrom('oauth_consents').select('client_id').whereRef('oauth_consents.client_id', '=', 'oauth_clients.id'))))
+    .execute();
 }

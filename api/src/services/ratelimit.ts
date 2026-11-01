@@ -25,6 +25,8 @@ export const LIMITS = {
   stepPassword: { max: 10, windowMs: MIN15 },
   /** OAuth token / revocation endpoint calls per client_id and IP */
   oauthToken: { max: 60, windowMs: 60_000 },
+  /** dynamic client registrations per IP */
+  oauthRegister: { max: 30, windowMs: 3_600_000 },
   /** OAuth introspection calls per client_id and IP */
   oauthIntrospect: { max: 300, windowMs: 60_000 },
   /** public API (/api/v1) requests per authorization (application + account) */

@@ -1,6 +1,7 @@
 // OAuth 2.0 authorization server — protocol endpoints (public, outside /api):
 //   GET  /.well-known/oauth-authorization-server   RFC 8414 metadata
 //   GET  /oauth/authorize                          RFC 6749 §4.1.1 (+ RFC 7636 PKCE, RFC 9207 iss)
+//   POST /oauth/register                           RFC 7591 dynamic client registration (Claude, local tools)
 //   POST /oauth/token                              authorization_code / refresh_token grants
 //   POST /oauth/revoke                             RFC 7009
 //   POST /oauth/introspect                         RFC 7662 (confidential clients, their own tokens only)
@@ -21,11 +22,14 @@ import {
   intersect,
   isSubset,
   issueTokens,
+  newClientId,
   newSecret,
   parseScopes,
   pkceMatches,
   revokeFamily,
   secretMatches,
+  selfRegisteredName,
+  selfRegisteredRedirectError,
   sha256,
   withParams,
   type IssuedTokens,
@@ -41,7 +45,9 @@ type OAuthErrorCode =
   | 'invalid_scope'
   | 'unsupported_response_type'
   | 'access_denied'
-  | 'server_error';
+  | 'server_error'
+  | 'invalid_redirect_uri'
+  | 'invalid_client_metadata';
 
 class OAuthError extends Error {
   constructor(public code: OAuthErrorCode, public description: string, public status = code === 'invalid_client' ? 401 : 400) {
@@ -185,6 +191,7 @@ export function createOAuthRouter() {
       issuer: ISSUER,
       authorization_endpoint: `${ISSUER}/oauth/authorize`,
       token_endpoint: `${ISSUER}/oauth/token`,
+      registration_endpoint: `${ISSUER}/oauth/register`,
       revocation_endpoint: `${ISSUER}/oauth/revoke`,
       introspection_endpoint: `${ISSUER}/oauth/introspect`,
       scopes_supported: OAUTH_SCOPES,
@@ -237,15 +244,17 @@ export function createOAuthRouter() {
       const prompt = param(q, 'prompt');
       if (!responseType) return fail('invalid_request', 'response_type manquant');
       if (responseType !== 'code') return fail('unsupported_response_type', 'Seul response_type=code est pris en charge');
-      if (!rawScope) return fail('invalid_scope', 'Paramètre scope manquant');
-      const scopes = parseScopes(rawScope);
+      // a self-registered client may leave the scope out: the consent screen lists everything it would get
+      const selfRegistered = client.user_id === null;
+      if (!rawScope && !selfRegistered) return fail('invalid_scope', 'Paramètre scope manquant');
+      const scopes = rawScope ? parseScopes(rawScope) : (client.scopes as OAuthScope[]);
       if (!scopes) return fail('invalid_scope', 'Scope inconnu');
       if (!isSubset(scopes, client.scopes)) return fail('invalid_scope', 'Scope non autorisé pour cette application');
       if (method !== undefined && method !== 'S256') return fail('invalid_request', 'Seule la méthode PKCE S256 est acceptée');
       if (challenge !== undefined && method === undefined) return fail('invalid_request', 'code_challenge_method=S256 requis');
       if (method !== undefined && challenge === undefined) return fail('invalid_request', 'code_challenge manquant');
       if (challenge !== undefined && !CHALLENGE_RE.test(challenge)) return fail('invalid_request', 'code_challenge invalide (BASE64URL(SHA256(code_verifier)), 43 caractères)');
-      if (clientIsPublic(client) && !challenge) return fail('invalid_request', 'PKCE (code_challenge S256) est obligatoire pour une application publique');
+      if ((clientIsPublic(client) || selfRegistered) && !challenge) return fail('invalid_request', 'PKCE (code_challenge S256) est obligatoire pour une application publique');
 
       const id = newSecret(PREFIX.request);
       await db
@@ -267,6 +276,59 @@ export function createOAuthRouter() {
       res.redirect(302, `${env.PUBLIC_URL}/oauth/consent?request=${encodeURIComponent(id.value)}`);
     } catch (e) {
       if (e instanceof OAuthError) return fail(e.code, e.description);
+      throw e;
+    }
+  });
+
+  // ----- dynamic client registration (RFC 7591): the MCP client only needs the server URL -----
+
+  r.use('/oauth/register', cors('POST'));
+  r.post('/oauth/register', async (req, res) => {
+    try {
+      if (!(await rateLimit(res, `oauth:register:${clientIp(req)}`, LIMITS.oauthRegister))) return;
+      const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+      const uris = body.redirect_uris;
+      if (!Array.isArray(uris) || !uris.length || uris.length > 10 || !uris.every((u) => typeof u === 'string')) {
+        throw new OAuthError('invalid_redirect_uri', 'redirect_uris : liste de 1 à 10 adresses attendue');
+      }
+      const redirectUris = [...new Set(uris as string[])];
+      for (const u of redirectUris) {
+        const err = selfRegisteredRedirectError(u);
+        if (err) throw new OAuthError('invalid_redirect_uri', `« ${u.slice(0, 200)} » : ${err}`);
+      }
+      const method = body.token_endpoint_auth_method ?? 'client_secret_basic'; // default of RFC 7591 §2
+      if (method !== 'none' && method !== 'client_secret_basic' && method !== 'client_secret_post') {
+        throw new OAuthError('invalid_client_metadata', 'token_endpoint_auth_method non pris en charge');
+      }
+      const secret = method === 'none' ? null : newSecret(PREFIX.clientSecret);
+      const client = await db
+        .insertInto('oauth_clients')
+        .values({
+          client_id: newClientId(),
+          user_id: null,
+          name: selfRegisteredName(redirectUris, body.client_name),
+          type: secret ? 'confidential' : 'public',
+          secret_hash: secret?.hash ?? null,
+          secret_hint: secret?.value.slice(-4) ?? null,
+          redirect_uris: redirectUris,
+          scopes: [...OAUTH_SCOPES],
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      noStore(res);
+      res.status(201).json({
+        client_id: client.client_id,
+        client_id_issued_at: Math.floor(Date.now() / 1000),
+        ...(secret ? { client_secret: secret.value, client_secret_expires_at: 0 } : {}),
+        client_name: client.name,
+        redirect_uris: client.redirect_uris,
+        grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code'],
+        token_endpoint_auth_method: method,
+        scope: client.scopes.join(' '),
+      });
+    } catch (e) {
+      if (e instanceof OAuthError) return sendError(res, e);
       throw e;
     }
   });

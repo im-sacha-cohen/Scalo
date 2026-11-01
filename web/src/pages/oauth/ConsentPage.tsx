@@ -116,17 +116,19 @@ export function ConsentPage() {
         <h1 className="mt-4 text-lg font-semibold text-slate-900">
           <span className="text-brand-700">{c.name}</span> souhaite accéder à votre compte
         </h1>
-        <p className="mt-1 text-xs text-slate-500">
-          Application développée par {c.owner_name}
-          {c.website && (
-            <>
-              {' · '}
-              <a href={c.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 font-medium text-slate-600 hover:text-slate-900">
-                {hostOf(c.website)} <ExternalLink size={11} />
-              </a>
-            </>
-          )}
-        </p>
+        {c.owner_name && (
+          <p className="mt-1 text-xs text-slate-500">
+            Application développée par {c.owner_name}
+            {c.website && (
+              <>
+                {' · '}
+                <a href={c.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 font-medium text-slate-600 hover:text-slate-900">
+                  {hostOf(c.website)} <ExternalLink size={11} />
+                </a>
+              </>
+            )}
+          </p>
+        )}
         {c.description && <p className="mt-3 text-sm text-slate-600">{c.description}</p>}
       </div>
 
