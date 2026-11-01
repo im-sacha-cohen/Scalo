@@ -8,6 +8,7 @@ set -eu
 SECRETS=/data/secrets.env
 PGDATA=/data/postgres
 BACKUPS=/data/backups
+WAITING=/tmp/scalo-waiting-for-data
 umask 077
 
 if [ -z "${PUBLIC_URL:-}" ]; then
@@ -33,6 +34,20 @@ fi
 # External database (docker-compose.prod.yml, hosted PostgreSQL): nothing else to do here.
 if [ -n "${DATABASE_URL:-}" ]; then
   exec "$@"
+fi
+
+# Only one PostgreSQL may use the data directory: two of them shut each other down and risk corrupting it. A rolling
+# update can start this container before stopping the previous one, and only stops it once this one is healthy: so
+# the health check passes while we wait (see WAITING in the Dockerfile), and the lock is released when the other exits.
+exec 9>/data/.lock
+if ! flock -n 9; then
+  echo '[scalo] Une autre instance utilise /data : attente de son arrêt…'
+  touch "$WAITING"
+  trap 'exit 143' TERM INT
+  flock 9 &
+  wait $!
+  trap - TERM INT
+  rm -f "$WAITING"
 fi
 
 PGPASSWORD=$(generated POSTGRES_PASSWORD)

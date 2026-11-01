@@ -63,8 +63,9 @@ EXPOSE 4000
 USER node
 WORKDIR /app/api
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.API_PORT||4000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+# healthy while waiting for the previous container to release /data: a rolling update only stops it once this one is healthy
+HEALTHCHECK --interval=5s --timeout=5s --start-period=40s --retries=6 \
+  CMD [ -e /tmp/scalo-waiting-for-data ] || node -e "fetch('http://127.0.0.1:'+(process.env.API_PORT||4000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "--import", "tsx", "src/index.ts"]
