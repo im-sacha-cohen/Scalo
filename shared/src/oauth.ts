@@ -7,6 +7,7 @@ export const OAUTH_SCOPES = [
   'tags:write',
   'funnels:read',
   'emails:read',
+  'emails:write',
   'campaigns:write',
   'purchases:write',
   'sales:read',
@@ -25,6 +26,10 @@ export const OAUTH_SCOPE_INFO: Record<OAuthScope, { label: string; description: 
   },
   'funnels:read': { label: 'Lire vos tunnels', description: 'Consulter vos tunnels de vente, leurs étapes et leurs statistiques.' },
   'emails:read': { label: 'Lire vos emails', description: 'Consulter vos newsletters, vos campagnes et leurs statistiques.' },
+  'emails:write': {
+    label: 'Rédiger et programmer vos emails',
+    description: 'Créer et modifier vos newsletters et vos campagnes, envoyer des tests, programmer l’envoi d’une newsletter à vos contacts.',
+  },
   'campaigns:write': { label: 'Inscrire à vos campagnes', description: 'Inscrire des contacts à vos campagnes email automatiques.' },
   'purchases:write': {
     label: 'Enregistrer des achats',

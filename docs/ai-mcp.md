@@ -13,7 +13,7 @@ Scalo utilise l’[API Claude](https://platform.claude.com/docs) d’Anthropic a
 
 ## Connecter Claude (serveur MCP)
 
-L’API expose un serveur [MCP](https://modelcontextprotocol.io) sur `POST <PUBLIC_URL>/mcp` (Streamable HTTP) : Claude — ou tout client MCP — peut lister / chercher / créer / mettre à jour des contacts, gérer leurs tags, lire les segments, les tunnels et leurs statistiques, les newsletters et les campagnes, inscrire un contact à une campagne et enregistrer un achat. Chaque outil passe par l’API publique `/api/v1` avec les mêmes scopes et les mêmes règles.
+L’API expose un serveur [MCP](https://modelcontextprotocol.io) sur `POST <PUBLIC_URL>/mcp` (Streamable HTTP) : Claude — ou tout client MCP — peut lister / chercher / créer / mettre à jour des contacts, gérer leurs tags, lire les segments, les tunnels et leurs statistiques, les newsletters et les campagnes, **rédiger une newsletter, s’envoyer un test et programmer son envoi**, **créer une campagne et ses emails**, inscrire un contact à une campagne et enregistrer un achat. Sans serveur SMTP configuré (Paramètres), les emails ne partent pas réellement : ils restent visibles dans Emails → Suivi des envois. Un Claude connecté avant l’ajout de ces outils doit être déconnecté puis reconnecté pour obtenir le droit `emails:write`. Chaque outil passe par l’API publique `/api/v1` avec les mêmes scopes et les mêmes règles.
 
 1. Dans Claude : Paramètres → Connecteurs → connecteur personnalisé, URL `https://votre-domaine/mcp`, sans rien d’autre. Avec Claude Code : `claude mcp add --transport http scalo https://votre-domaine/mcp`.
 2. Claude vous envoie sur l’écran d’autorisation Scalo : connectez-vous et acceptez.

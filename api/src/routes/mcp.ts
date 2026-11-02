@@ -52,7 +52,20 @@ const contactFields = {
     ),
 };
 
-/** Tools = endpoints of the public API v1 (see routes/v1.ts, routes/v1-crm.ts). */
+const emailText = {
+  preheader: z.string().max(150).optional().describe('Phrase d’aperçu affichée après l’objet dans la boîte de réception'),
+  paragraphs: z
+    .array(z.string().max(5000))
+    .min(1)
+    .max(50)
+    .describe('Paragraphes du corps de l’email. Mise en forme : **gras**, *italique*, [texte du lien](https://…). Variables : {{first_name}}, {{last_name}}, {{email}}.'),
+  button_label: z.string().max(60).optional().describe('Texte du bouton (avec button_url)'),
+  button_url: z.string().max(500).optional().describe('Lien du bouton, https://…'),
+};
+const emailTextPatch = { ...emailText, paragraphs: emailText.paragraphs.optional().describe('Nouveau corps complet (remplace tout le contenu, avec preheader et bouton)') };
+const NO_SMTP = 'Sans serveur SMTP configuré dans Scalo (Paramètres), les emails ne partent pas réellement : ils restent visibles dans Emails → Suivi des envois.';
+
+/** Tools = endpoints of the public API v1 (see routes/v1.ts, routes/v1-crm.ts, routes/v1-emails.ts). */
 export const MCP_TOOLS: ToolDef[] = [
   { name: 'get_account', title: 'Compte', description: 'Nom et adresse email du compte Scalo connecté.', scope: 'profile', readOnly: true, input: {}, call: () => ({ method: 'GET', path: '/me' }) },
   {
@@ -130,6 +143,88 @@ export const MCP_TOOLS: ToolDef[] = [
   { name: 'list_funnels', title: 'Tunnels et statistiques', description: 'Tunnels de vente avec leurs étapes, leurs URL publiques, les vues et les inscriptions.', scope: 'funnels:read', readOnly: true, input: {}, call: () => ({ method: 'GET', path: '/funnels' }) },
   { name: 'list_newsletters', title: 'Newsletters', description: 'Newsletters (brouillons, programmées, envoyées) avec leurs statistiques d’envoi, d’ouverture et de clic.', scope: 'emails:read', readOnly: true, input: {}, call: () => ({ method: 'GET', path: '/broadcasts' }) },
   { name: 'list_campaigns', title: 'Campagnes email', description: 'Campagnes (séquences automatiques) avec leur tag déclencheur et leur nombre d’emails.', scope: 'emails:read', readOnly: true, input: {}, call: () => ({ method: 'GET', path: '/campaigns' }) },
+  { name: 'get_newsletter', title: 'Détail d’une newsletter', description: 'Une newsletter avec son contenu, ses destinataires, son statut et ses statistiques.', scope: 'emails:read', readOnly: true, input: { newsletter_id: id('Identifiant de la newsletter') }, call: (a) => ({ method: 'GET', path: `/broadcasts/${a.newsletter_id}` }) },
+  {
+    name: 'create_newsletter',
+    title: 'Rédiger une newsletter',
+    description:
+      'Crée une newsletter en brouillon (rien n’est envoyé). Destinataires : tous les contacts confirmés et abonnés, ou ceux d’un tag (`tag_id`) ou d’un segment (`segment_id`). Pour l’envoyer : schedule_newsletter.',
+    scope: 'emails:write',
+    readOnly: false,
+    input: { subject: z.string().min(1).max(250), ...emailText, tag_id: id('Envoyer seulement aux contacts de ce tag').optional(), segment_id: id('Envoyer seulement aux contacts de ce segment').optional() },
+    call: (a) => ({ method: 'POST', path: '/broadcasts', body: a }),
+  },
+  {
+    name: 'update_newsletter',
+    title: 'Modifier une newsletter',
+    description: 'Modifie une newsletter en brouillon ou programmée (objet, corps, destinataires ; `tag_id` / `segment_id` à null = tous les contacts). Impossible une fois envoyée.',
+    scope: 'emails:write',
+    readOnly: false,
+    input: {
+      newsletter_id: id('Identifiant de la newsletter'),
+      subject: z.string().min(1).max(250).optional(),
+      ...emailTextPatch,
+      tag_id: id('Identifiant du tag').nullable().optional(),
+      segment_id: id('Identifiant du segment').nullable().optional(),
+    },
+    call: ({ newsletter_id, ...body }) => ({ method: 'PATCH', path: `/broadcasts/${newsletter_id}`, body }),
+  },
+  {
+    name: 'send_test_email',
+    title: 'Envoyer un test',
+    description: `Envoie tout de suite la newsletter à une seule adresse, avec [TEST] dans l’objet. ${NO_SMTP}`,
+    scope: 'emails:write',
+    readOnly: false,
+    input: { newsletter_id: id('Identifiant de la newsletter'), email: z.string().max(254).describe('Adresse qui reçoit le test') },
+    call: (a) => ({ method: 'POST', path: `/broadcasts/${a.newsletter_id}/test`, body: { email: a.email } }),
+  },
+  {
+    name: 'schedule_newsletter',
+    title: 'Programmer l’envoi d’une newsletter',
+    description: `Programme l’envoi à tous ses destinataires, de 1 minute à 1 an à l’avance. Demandez confirmation à l’utilisateur avant : l’envoi part tout seul à l’heure dite. ${NO_SMTP}`,
+    scope: 'emails:write',
+    readOnly: false,
+    input: { newsletter_id: id('Identifiant de la newsletter'), scheduled_at: z.string().describe('Date et heure ISO 8601 avec fuseau, ex. 2026-11-05T09:00:00+01:00') },
+    call: (a) => ({ method: 'POST', path: `/broadcasts/${a.newsletter_id}/schedule`, body: { scheduled_at: a.scheduled_at } }),
+  },
+  {
+    name: 'unschedule_newsletter',
+    title: 'Annuler la programmation',
+    description: 'Repasse une newsletter programmée en brouillon (tant que l’envoi n’a pas commencé).',
+    scope: 'emails:write',
+    readOnly: false,
+    input: { newsletter_id: id('Identifiant de la newsletter') },
+    call: (a) => ({ method: 'POST', path: `/broadcasts/${a.newsletter_id}/unschedule` }),
+  },
+  { name: 'get_campaign', title: 'Détail d’une campagne', description: 'Une campagne avec ses emails (objet, contenu, délai), son nombre d’inscrits et ses statistiques.', scope: 'emails:read', readOnly: true, input: { campaign_id: id('Identifiant de la campagne') }, call: (a) => ({ method: 'GET', path: `/campaigns/${a.campaign_id}` }) },
+  {
+    name: 'create_campaign',
+    title: 'Créer une campagne',
+    description:
+      'Crée une campagne email automatique (séquence), vide. `trigger_tag` : nom du tag qui inscrit automatiquement un contact (créé s’il n’existe pas) ; `stop_tag` : tag qui l’arrête. Ajoutez ensuite les emails avec add_campaign_email.',
+    scope: 'emails:write',
+    readOnly: false,
+    input: { name: z.string().min(1).max(120), trigger_tag: z.string().min(1).max(60).optional(), stop_tag: z.string().min(1).max(60).optional() },
+    call: (a) => ({ method: 'POST', path: '/campaigns', body: a }),
+  },
+  {
+    name: 'add_campaign_email',
+    title: 'Ajouter un email à une campagne',
+    description: `Ajoute un email à la fin de la séquence. \`delay_days\` : jours d’attente après l’email précédent (après l’inscription pour le premier, 0 = tout de suite). Les inscrits actifs pour qui il est déjà dû le reçoivent maintenant, sauf \`apply_to_existing: false\`. ${NO_SMTP}`,
+    scope: 'emails:write',
+    readOnly: false,
+    input: { campaign_id: id('Identifiant de la campagne'), subject: z.string().min(1).max(250), delay_days: z.number().int().min(0).max(3650), ...emailText, apply_to_existing: z.boolean().optional() },
+    call: ({ campaign_id, ...body }) => ({ method: 'POST', path: `/campaigns/${campaign_id}/emails`, body }),
+  },
+  {
+    name: 'update_campaign_email',
+    title: 'Modifier un email de campagne',
+    description: 'Modifie l’objet, le délai ou le corps d’un email de campagne (un nouveau délai décale les envois en attente).',
+    scope: 'emails:write',
+    readOnly: false,
+    input: { email_id: id('Identifiant de l’email (voir get_campaign)'), subject: z.string().min(1).max(250).optional(), delay_days: z.number().int().min(0).max(3650).optional(), ...emailTextPatch },
+    call: ({ email_id, ...body }) => ({ method: 'PATCH', path: `/campaign-emails/${email_id}`, body }),
+  },
   {
     name: 'enroll_in_campaign',
     title: 'Inscrire à une campagne',
@@ -183,7 +278,7 @@ async function callV1(req: Request, token: string, c: V1Call): Promise<ToolResul
 function buildServer(req: Request, token: string, scopes: OAuthScope[]) {
   const server = new McpServer(
     { name: 'scalo', title: 'Scalo', version: '1.0.0' },
-    { instructions: 'Outils du compte Scalo de l’utilisateur (tunnels de vente, emails, CRM). Les outils d’écriture agissent sur des données réelles : un tag ou une inscription à une campagne peut déclencher l’envoi d’emails.' },
+    { instructions: 'Outils du compte Scalo de l’utilisateur (tunnels de vente, emails, CRM). Les outils d’écriture agissent sur des données réelles : un tag ou une inscription à une campagne peut déclencher l’envoi d’emails. Demandez confirmation avant de programmer l’envoi d’une newsletter.' },
   );
   for (const t of MCP_TOOLS) {
     server.registerTool(
@@ -191,7 +286,7 @@ function buildServer(req: Request, token: string, scopes: OAuthScope[]) {
       { title: t.title, description: `${t.description} (scope requis : ${t.scope})`, inputSchema: t.input, annotations: { readOnlyHint: t.readOnly, destructiveHint: false, openWorldHint: false } },
       async (args: unknown) => {
         if (!scopes.includes(t.scope)) {
-          return result(`Scope « ${t.scope} » requis : l’application connectée n’a pas cette autorisation. Ajoutez ce scope à l’application dans Développeurs puis reconnectez-la.`, true);
+          return result(`Scope « ${t.scope} » requis : l’application connectée n’a pas cette autorisation. Déconnectez puis reconnectez Scalo dans Claude pour l’accorder (ou ajoutez ce scope à l’application dans Développeurs).`, true);
         }
         try {
           return await callV1(req, token, t.call(args ?? {}));

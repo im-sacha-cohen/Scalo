@@ -8,6 +8,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { db } from '../src/db';
 import { env } from '../src/env';
 import { MCP_TOOLS } from '../src/routes/mcp';
+import { EmailWorker } from '../src/worker';
 import { cleanupOAuth } from '../src/services/oauth-server';
 import { client, http, registerUser, shutdown, startApp, type TestCtx } from './helpers';
 
@@ -21,7 +22,7 @@ beforeEach(async () => {
 });
 
 const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
-const ALL = ['profile', 'contacts:read', 'contacts:write', 'tags:write', 'funnels:read', 'emails:read', 'campaigns:write', 'purchases:write'];
+const ALL = ['profile', 'contacts:read', 'contacts:write', 'tags:write', 'funnels:read', 'emails:read', 'emails:write', 'campaigns:write', 'purchases:write'];
 const METADATA = `${env.PUBLIC_URL}/.well-known/oauth-protected-resource`;
 
 /** New account + application + access token with `scopes` (authorize → consent → code → token). */
@@ -303,4 +304,103 @@ test('isolation between accounts', async () => {
   assert.equal((await call(ca, 'get_contact', { contact_id: contact.id })).first_name, null);
   assert.equal((await call(ca, 'get_account')).email, a.email);
   assert.equal((await call(cb, 'get_account')).email, b.email);
+});
+
+/** A brand-new account connected the way Claude does it: self-registration, consent (all scopes), PKCE. */
+async function connectClaude() {
+  const reg = await register({ redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none' });
+  const u = await registerUser(ctx);
+  const api = client(ctx, u.token);
+  const q = new URLSearchParams({ response_type: 'code', client_id: reg.body.client_id, redirect_uri: REDIRECT, code_challenge: CHALLENGE, code_challenge_method: 'S256' });
+  const requestId = new URL((await http(ctx, 'GET', `/oauth/authorize?${q}`)).headers.get('location')!).searchParams.get('request')!;
+  const consent = await api.post('/api/oauth/consent', { request_id: requestId, decision: 'approve' });
+  const code = new URL(consent.body.redirect_to).searchParams.get('code')!;
+  const tok = await http(ctx, 'POST', '/oauth/token', { form: { grant_type: 'authorization_code', code, redirect_uri: REDIRECT, client_id: reg.body.client_id, code_verifier: VERIFIER } });
+  assert.equal(tok.status, 200, tok.text);
+  assert.ok(tok.body.scope.split(' ').includes('emails:write'));
+  return { ...u, api, c: await mcp(tok.body.access_token) };
+}
+
+const inMinutes = (m: number) => new Date(Date.now() + m * 60_000).toISOString();
+
+test('blank account: Claude writes, tests, schedules a newsletter and it is sent at the scheduled time', async () => {
+  const { api, c, user } = await connectClaude();
+  const { tools } = await c.listTools();
+  for (const name of ['create_newsletter', 'update_newsletter', 'send_test_email', 'schedule_newsletter', 'unschedule_newsletter', 'get_newsletter', 'create_campaign', 'add_campaign_email', 'update_campaign_email', 'get_campaign']) {
+    assert.ok(tools.some((t) => t.name === name), name);
+  }
+  await call(c, 'create_contact', { email: 'ada@example.com', first_name: 'Ada' });
+  await call(c, 'create_contact', { email: 'bob@example.com', first_name: 'Bob' });
+
+  const nl = await call(c, 'create_newsletter', {
+    subject: 'Nouveautés de novembre',
+    preheader: 'Trois nouveautés',
+    paragraphs: ['Bonjour {{first_name}},', 'Voici **trois** nouveautés. [Le blog](https://example.com/blog)'],
+    button_label: 'Découvrir',
+    button_url: 'https://example.com/nouveautes',
+  });
+  assert.equal(nl.status, 'draft');
+  assert.deepEqual(nl.content.blocks.map((b: any) => b.type), ['text', 'text', 'button']);
+  assert.equal(nl.content.settings.preheader, 'Trois nouveautés');
+  const id = nl.id;
+  assert.equal((await call(c, 'update_newsletter', { newsletter_id: id, subject: 'Nouveautés de novembre !' })).subject, 'Nouveautés de novembre !');
+  assert.equal((await call(c, 'get_newsletter', { newsletter_id: id })).content.blocks.length, 3, 'subject change keeps the content');
+
+  // no SMTP on a blank account: the test is recorded, not delivered
+  assert.deepEqual(await call(c, 'send_test_email', { newsletter_id: id, email: 'me@example.com' }), { ok: true, delivered: false });
+
+  assert.match((await call(c, 'schedule_newsletter', { newsletter_id: id, scheduled_at: new Date(Date.now() - 60_000).toISOString() })).error, /Erreur 400/);
+  assert.equal((await call(c, 'schedule_newsletter', { newsletter_id: id, scheduled_at: inMinutes(5) })).status, 'scheduled');
+  assert.equal((await call(c, 'unschedule_newsletter', { newsletter_id: id })).status, 'draft');
+  assert.equal((await call(c, 'schedule_newsletter', { newsletter_id: id, scheduled_at: inMinutes(5) })).status, 'scheduled');
+
+  // the scheduled time comes: the worker starts it and sends one email per contact
+  await db.updateTable('broadcasts').set({ scheduled_at: new Date(Date.now() - 1000).toISOString() }).where('id', '=', id).execute();
+  await new EmailWorker({ throttle: false }).drain();
+  const sends = await db.selectFrom('email_sends').select(['to_email', 'status', 'html']).where('broadcast_id', '=', id).where('is_test', '=', false).orderBy('to_email').execute();
+  assert.deepEqual(sends.map((x) => [x.to_email, x.status]), [['ada@example.com', 'sent'], ['bob@example.com', 'sent']]);
+  assert.match(sends[0].html!, /Bonjour Ada,/);
+  assert.match(sends[0].html!, /<strong>trois<\/strong>/);
+  assert.match(sends[0].html!, />Découvrir</, 'button (its link goes through click tracking)');
+  assert.equal((await call(c, 'get_newsletter', { newsletter_id: id })).status, 'sent');
+  assert.match((await call(c, 'update_newsletter', { newsletter_id: id, subject: 'Trop tard' })).error, /Erreur 409/);
+  // the web app sees the same newsletter
+  assert.equal((await api.get(`/api/broadcasts/${id}`)).body.subject, 'Nouveautés de novembre !');
+  assert.ok(user.id);
+});
+
+test('blank account: Claude builds a campaign that a tag triggers', async () => {
+  const { c } = await connectClaude();
+  const camp = await call(c, 'create_campaign', { name: 'Bienvenue', trigger_tag: 'lead' });
+  assert.ok(camp.trigger_tag_id, 'trigger tag created');
+  const first = await call(c, 'add_campaign_email', { campaign_id: camp.id, subject: 'Bienvenue {{first_name}}', delay_days: 0, paragraphs: ['Merci de votre inscription.'] });
+  await call(c, 'add_campaign_email', { campaign_id: camp.id, subject: 'Jour 2', delay_days: 2, paragraphs: ['Deuxième email.'] });
+  assert.equal((await call(c, 'update_campaign_email', { email_id: first.id, paragraphs: ['Merci {{first_name}} !'] })).subject, 'Bienvenue {{first_name}}');
+  const detail = await call(c, 'get_campaign', { campaign_id: camp.id });
+  assert.deepEqual(detail.emails.map((e: any) => [e.subject, e.delay_days]), [['Bienvenue {{first_name}}', 0], ['Jour 2', 2]]);
+
+  const ada = await call(c, 'create_contact', { email: 'ada@example.com', first_name: 'Ada', tags: ['lead'] });
+  await new EmailWorker({ throttle: false }).drain();
+  const sends = await db.selectFrom('email_sends').select(['subject', 'status', 'html', 'send_at']).where('campaign_id', '=', camp.id).orderBy('send_at').execute();
+  assert.deepEqual(sends.map((x) => [x.subject, x.status]), [['Bienvenue Ada', 'sent'], ['Jour 2', 'pending']]);
+  assert.match(sends[0].html!, /Merci Ada !/);
+  assert.ok(ada.id);
+});
+
+test('email tools: validation, scope and isolation', async () => {
+  const { c } = await connectClaude();
+  const nl = await call(c, 'create_newsletter', { subject: 'S', paragraphs: ['Texte'] });
+  assert.match((await call(c, 'create_newsletter', { subject: 'S', paragraphs: ['x'], button_label: 'Go' })).error, /Erreur 400 : Le bouton/);
+  assert.match((await call(c, 'create_newsletter', { subject: 'S', paragraphs: ['x'], button_label: 'Go', button_url: 'javascript:alert(1)' })).error, /Erreur 400/);
+  assert.match((await call(c, 'update_newsletter', { newsletter_id: nl.id, preheader: 'seul' })).error, /Erreur 400/);
+  assert.match((await call(c, 'create_newsletter', { subject: 'S', paragraphs: ['  '] })).error, /Erreur 400/);
+
+  const other = await connectClaude();
+  assert.match((await call(other.c, 'update_newsletter', { newsletter_id: nl.id, subject: 'Hacked' })).error, /Erreur 404/);
+  assert.match((await call(other.c, 'schedule_newsletter', { newsletter_id: nl.id, scheduled_at: inMinutes(5) })).error, /Erreur 404/);
+  assert.match((await call(other.c, 'get_newsletter', { newsletter_id: nl.id })).error, /Erreur 404/);
+
+  const readOnly = await connect(['profile', 'emails:read']);
+  const r = await call(await mcp(readOnly.token), 'create_newsletter', { subject: 'S', paragraphs: ['x'] });
+  assert.match(r.error, /Scope « emails:write » requis/);
 });

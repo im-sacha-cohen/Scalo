@@ -16,6 +16,7 @@ import { statsFor, toCampaigns } from './emails';
 import { HttpError, notFound, paramId } from '../util';
 import { fieldDefMap, validateFields } from '../services/fields';
 import { mountV1Crm } from './v1-crm';
+import { mountV1Emails } from './v1-emails';
 import { mountV1Sales } from './v1-sales';
 
 declare global {
@@ -209,7 +210,7 @@ export function createV1Router() {
     );
   });
 
-  // ----- emails (read only) -----
+  // ----- emails (lists; writing: routes/v1-emails.ts) -----
 
   r.get('/broadcasts', need('emails:read'), async (req, res) => {
     const rows = await db
@@ -240,6 +241,8 @@ export function createV1Router() {
     res.json({ ok: true, enrolled });
   });
 
+  // ----- newsletters and campaigns: detail, writing, test, scheduling -----
+  mountV1Emails(r, { need, grant });
   // ----- CRM: custom fields, segments (read), purchases -----
   mountV1Crm(r, { need, grant });
   // ----- sales (read only): products, orders -----

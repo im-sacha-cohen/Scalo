@@ -18,6 +18,7 @@ L’application est un **serveur d’autorisation OAuth 2.0** : des applications
 | `tags:write` | ajouter / retirer des tags (déclenche les campagnes liées au tag) |
 | `funnels:read` | tunnels, étapes et statistiques |
 | `emails:read` | newsletters et campagnes + statistiques |
+| `emails:write` | rédiger newsletters et campagnes, envoyer un test, programmer une newsletter |
 | `campaigns:write` | inscrire un contact à une campagne |
 | `purchases:write` | enregistrer un achat (`POST /api/v1/purchases`, déclenche les automatisations « Achat ») ; créer le contact s’il n’existe pas demande aussi `contacts:write` |
 | `sales:read` | lire les produits, leurs offres et les commandes (`GET /api/v1/products`, `/api/v1/orders`) |

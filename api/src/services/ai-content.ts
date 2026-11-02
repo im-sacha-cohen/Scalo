@@ -430,4 +430,15 @@ export function buildEmail(e: NewsletterOutput, linkUrl: string | undefined, kit
   return { subject, content: { settings: { ...settings, ...(preheader ? { preheader } : {}) }, blocks } };
 }
 
-export const clampDelay = (d: number, first: boolean) => (first ? 0 : Math.min(60, Math.max(0, Math.trunc(d))));
+/**
+ * Email written by the user or their own agent (API v1, MCP): paragraphs kept as written — the text block renders the
+ * escaped markdown subset (**gras**, *italique*, [lien](url)) and {{variables}} — plus an optional button.
+ */
+export function textEmailContent(e: { preheader?: string; paragraphs: string[]; button?: { label: string; url: string } }): PageContent {
+  const blocks: Block[] = e.paragraphs.map((p) => p.trim()).filter(Boolean).map((p) => text(p));
+  if (e.button) blocks.push({ id: id(), type: 'button', label: e.button.label, action: 'url', url: e.button.url, style: { align: 'center' } });
+  const preheader = e.preheader?.trim();
+  return { settings: { ...DEFAULT_EMAIL_SETTINGS, ...(preheader ? { preheader } : {}) }, blocks };
+}
+
+export const clampDelay =(d: number, first: boolean) => (first ? 0 : Math.min(60, Math.max(0, Math.trunc(d))));

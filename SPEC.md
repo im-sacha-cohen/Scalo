@@ -103,6 +103,12 @@ Routes de l’application web (JWT de session, sous `/api`) :
 | GET | /api/v1/broadcasts | `emails:read` | `{id, subject, status, tag_id, sent_at, scheduled_at, created_at, stats}` |
 | GET | /api/v1/campaigns | `emails:read` | `Campaign[]` (emails sans contenu) |
 | POST | /api/v1/campaigns/:id/enroll | `campaigns:write` | `{contact_id}` → `{ok, enrolled}` ; 409 double opt-in non confirmé |
+| GET | /api/v1/broadcasts/:id, /api/v1/campaigns/:id | `emails:read` | `Broadcast` / `Campaign` (avec contenu) |
+| POST | /api/v1/broadcasts | `emails:write` | `{subject, paragraphs[1..50], preheader?, button_label? + button_url?, tag_id?, segment_id?}` → `Broadcast` brouillon (format texte : paragraphes en sous-ensemble markdown + `{{variables}}`, `services/ai-content.ts textEmailContent`) |
+| PATCH | /api/v1/broadcasts/:id | `emails:write` | mêmes champs, optionnels ; `paragraphs` remplace tout le contenu (preheader et bouton avec lui) ; 409 une fois envoyée |
+| POST | /api/v1/broadcasts/:id/test · /schedule · /unschedule | `emails:write` | comme l’app (`{email}` → `{ok, delivered}` ; `{scheduled_at}`) — pas d’« envoyer maintenant » dans l’API |
+| POST | /api/v1/campaigns | `emails:write` | `{name, trigger_tag?, stop_tag?}` (noms de tags, créés au besoin) → `Campaign` |
+| POST | /api/v1/campaigns/:id/emails · PATCH /api/v1/campaign-emails/:id | `emails:write` | `{subject, delay_days, paragraphs…, apply_to_existing?}` → `CampaignEmail` |
 | GET | /api/v1/custom-fields | `contacts:read` | `CustomField[]` |
 | POST | /api/v1/custom-fields | `contacts:write` | `{label, type, key?, options?}` → 201 `CustomField` (mêmes règles que l’app) |
 | GET | /api/v1/segments | `contacts:read` | `Segment[]` avec `contacts_count` |
@@ -156,6 +162,9 @@ Chaque outil vérifie son scope (sinon résultat `isError` « Scope « … » re
 | `list_funnels` (étapes, vues, inscriptions) | `funnels:read` | GET /funnels |
 | `list_newsletters`, `list_campaigns` | `emails:read` | GET /broadcasts, /campaigns |
 | `enroll_in_campaign` | `campaigns:write` | POST /campaigns/:id/enroll |
+| `get_newsletter`, `get_campaign` | `emails:read` | GET /broadcasts/:id, /campaigns/:id |
+| `create_newsletter`, `update_newsletter`, `send_test_email`, `schedule_newsletter`, `unschedule_newsletter` | `emails:write` | POST/PATCH /broadcasts, /test, /schedule, /unschedule |
+| `create_campaign`, `add_campaign_email`, `update_campaign_email` | `emails:write` | POST /campaigns, /campaigns/:id/emails, PATCH /campaign-emails/:id |
 | `record_purchase` | `purchases:write` | POST /purchases |
 
 Tests (`api/test/mcp.test.ts`) : client MCP officiel de bout en bout (401 + `WWW-Authenticate`, scope insuffisant, appels d’outils, isolation entre comptes).

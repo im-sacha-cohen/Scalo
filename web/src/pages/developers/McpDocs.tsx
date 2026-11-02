@@ -15,7 +15,10 @@ const TOOLS: [string, string, OAuthScope][] = [
   ['add_tag_to_contact · remove_tag_from_contact', 'Taguer un contact', 'tags:write'],
   ['list_segments · list_segment_contacts', 'Segments (lecture)', 'contacts:read'],
   ['list_funnels', 'Tunnels, étapes, vues et inscriptions', 'funnels:read'],
-  ['list_newsletters · list_campaigns', 'Newsletters, campagnes et statistiques', 'emails:read'],
+  ['list_newsletters · list_campaigns · get_newsletter · get_campaign', 'Newsletters, campagnes, contenu et statistiques', 'emails:read'],
+  ['create_newsletter · update_newsletter · send_test_email', 'Rédiger une newsletter, s’envoyer un test', 'emails:write'],
+  ['schedule_newsletter · unschedule_newsletter', 'Programmer l’envoi, l’annuler', 'emails:write'],
+  ['create_campaign · add_campaign_email · update_campaign_email', 'Créer une séquence automatique et ses emails', 'emails:write'],
   ['enroll_in_campaign', 'Inscrire un contact à une campagne', 'campaigns:write'],
   ['record_purchase', 'Enregistrer un achat', 'purchases:write'],
 ];

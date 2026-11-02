@@ -116,26 +116,26 @@ emailsRouter.get('/broadcasts', async (req, res) => {
   res.json(rows.map((r) => toBroadcast(r, stats.get(r.id))));
 });
 
-emailsRouter.post('/broadcasts', async (req, res) => {
-  const userId = uid(req);
-  // `content`: email chosen in the template gallery (a kit's email…), otherwise the plain default
-  const { subject, content } = z.object({ subject: subjectSchema, content: pageContentSchema.optional() }).parse(req.body);
+// The operations below are shared by the web app's routes and the public API (routes/v1-emails.ts).
+
+/** `content`: email chosen in the template gallery (a kit's email…), otherwise the plain default. */
+export async function createBroadcast(userId: number, input: unknown) {
+  const { subject, content } = z.object({ subject: subjectSchema, content: pageContentSchema.optional() }).parse(input);
   const row = await db
     .insertInto('broadcasts')
     .values({ user_id: userId, subject, content: JSON.stringify(content ?? emailTemplate()), status: 'draft', created_at: nowIso() })
     .returningAll()
     .executeTakeFirstOrThrow();
-  res.status(201).json(await broadcastWithStats(row));
-});
+  return broadcastWithStats(row);
+}
 
-emailsRouter.get('/broadcasts/:id', async (req, res) => {
-  res.json(await broadcastWithStats(await ownedBroadcast(uid(req), req.params.id)));
-});
+export async function getBroadcast(userId: number, rawId: unknown) {
+  return broadcastWithStats(await ownedBroadcast(userId, rawId));
+}
 
-// Editable while draft or scheduled (until the scheduled send starts).
-emailsRouter.patch('/broadcasts/:id', async (req, res) => {
-  const userId = uid(req);
-  const b = await ownedBroadcast(userId, req.params.id);
+/** Editable while draft or scheduled (until the scheduled send starts). */
+export async function updateBroadcast(userId: number, rawId: unknown, input: unknown) {
+  const b = await ownedBroadcast(userId, rawId);
   if (b.status === 'sent') throw new HttpError(409, ALREADY_SENT);
   const body = z
     .object({
@@ -145,7 +145,7 @@ emailsRouter.patch('/broadcasts/:id', async (req, res) => {
       segment_id: tagIdSchema.optional(),
       ab_test: abTestSchema.nullable().optional(),
     })
-    .parse(req.body);
+    .parse(input);
   await assertTag(userId, body.tag_id);
   if (body.segment_id && !(await db.selectFrom('segments').select('id').where('id', '=', body.segment_id).where('user_id', '=', userId).executeTakeFirst())) {
     throw notFound('Segment');
@@ -164,14 +164,13 @@ emailsRouter.patch('/broadcasts/:id', async (req, res) => {
     .returningAll()
     .executeTakeFirst();
   if (!updated) throw new HttpError(409, ALREADY_SENT);
-  res.json(await broadcastWithStats(updated));
-});
+  return broadcastWithStats(updated);
+}
 
-emailsRouter.post('/broadcasts/:id/schedule', async (req, res) => {
-  const userId = uid(req);
-  const b = await ownedBroadcast(userId, req.params.id);
+export async function scheduleBroadcast(userId: number, rawId: unknown, input: unknown) {
+  const b = await ownedBroadcast(userId, rawId);
   if (b.status === 'sent') throw new HttpError(409, ALREADY_SENT);
-  const { scheduled_at } = z.object({ scheduled_at: z.iso.datetime({ offset: true }) }).parse(req.body);
+  const { scheduled_at } = z.object({ scheduled_at: z.iso.datetime({ offset: true }) }).parse(input);
   const at = new Date(scheduled_at).getTime();
   if (!Number.isFinite(at) || at < Date.now() + SCHEDULE_MIN_MS) throw new HttpError(400, 'La date d’envoi doit être dans au moins 1 minute');
   if (at > Date.now() + SCHEDULE_MAX_MS) throw new HttpError(400, 'La date d’envoi ne peut pas dépasser 1 an');
@@ -183,12 +182,11 @@ emailsRouter.post('/broadcasts/:id/schedule', async (req, res) => {
     .returningAll()
     .executeTakeFirst();
   if (!row) throw new HttpError(409, ALREADY_SENT);
-  res.json(await broadcastWithStats(row));
-});
+  return broadcastWithStats(row);
+}
 
-emailsRouter.post('/broadcasts/:id/unschedule', async (req, res) => {
-  const userId = uid(req);
-  const b = await ownedBroadcast(userId, req.params.id);
+export async function unscheduleBroadcast(userId: number, rawId: unknown) {
+  const b = await ownedBroadcast(userId, rawId);
   const row = await db
     .updateTable('broadcasts')
     .set({ status: 'draft', scheduled_at: null })
@@ -197,7 +195,23 @@ emailsRouter.post('/broadcasts/:id/unschedule', async (req, res) => {
     .returningAll()
     .executeTakeFirst();
   if (!row) throw new HttpError(409, b.status === 'sent' ? 'L’envoi de cette newsletter a déjà commencé' : 'Cette newsletter n’est pas programmée');
-  res.json(await broadcastWithStats(row));
+  return broadcastWithStats(row);
+}
+
+emailsRouter.post('/broadcasts', async (req, res) => {
+  res.status(201).json(await createBroadcast(uid(req), req.body));
+});
+emailsRouter.get('/broadcasts/:id', async (req, res) => {
+  res.json(await getBroadcast(uid(req), req.params.id));
+});
+emailsRouter.patch('/broadcasts/:id', async (req, res) => {
+  res.json(await updateBroadcast(uid(req), req.params.id, req.body));
+});
+emailsRouter.post('/broadcasts/:id/schedule', async (req, res) => {
+  res.json(await scheduleBroadcast(uid(req), req.params.id, req.body));
+});
+emailsRouter.post('/broadcasts/:id/unschedule', async (req, res) => {
+  res.json(await unscheduleBroadcast(uid(req), req.params.id));
 });
 
 emailsRouter.delete('/broadcasts/:id', async (req, res) => {
@@ -242,10 +256,10 @@ emailsRouter.post('/broadcasts/:id/send', async (req, res) => {
   res.json(await broadcastWithStats(await ownedBroadcast(userId, sent.id))); // re-read: A/B phase set by startBroadcast
 });
 
-emailsRouter.post('/broadcasts/:id/test', async (req, res) => {
-  const userId = uid(req);
-  const b = await ownedBroadcast(userId, req.params.id);
-  const { email } = z.object({ email: z.email() }).parse(req.body);
+/** Sends the newsletter to one address, now, with `[TEST]` in the subject (recorded as a test send). */
+export async function sendBroadcastTest(userId: number, rawId: unknown, input: unknown) {
+  const b = await ownedBroadcast(userId, rawId);
+  const { email } = z.object({ email: z.email() }).parse(input);
   const settings = await getSettingsRow(userId);
   const contact = await db
     .selectFrom('contacts')
@@ -277,7 +291,11 @@ emailsRouter.post('/broadcasts/:id/test', async (req, res) => {
     })
     .execute();
   if (!result.ok) throw new HttpError(502, `Échec de l’envoi : ${result.error}`);
-  res.json({ ok: true });
+  return { ok: true, delivered: !result.dev };
+}
+
+emailsRouter.post('/broadcasts/:id/test', async (req, res) => {
+  res.json(await sendBroadcastTest(uid(req), req.params.id, req.body));
 });
 
 // ---------- campaigns ----------
@@ -352,11 +370,10 @@ emailsRouter.get('/campaigns', async (req, res) => {
   res.json(await toCampaigns(rows, false));
 });
 
-emailsRouter.post('/campaigns', async (req, res) => {
-  const userId = uid(req);
+export async function createCampaign(userId: number, input: unknown) {
   const body = z
     .object({ name: z.string().trim().min(1).max(120), trigger_tag_id: tagIdSchema.optional(), stop_tag_id: tagIdSchema.optional() })
-    .parse(req.body);
+    .parse(input);
   await assertTag(userId, body.trigger_tag_id);
   await assertTag(userId, body.stop_tag_id);
   const row = await db
@@ -364,11 +381,18 @@ emailsRouter.post('/campaigns', async (req, res) => {
     .values({ user_id: userId, name: body.name, trigger_tag_id: body.trigger_tag_id ?? null, stop_tag_id: body.stop_tag_id ?? null, created_at: nowIso() })
     .returningAll()
     .executeTakeFirstOrThrow();
-  res.status(201).json(await toCampaign(row, true));
-});
+  return toCampaign(row, true);
+}
 
+export async function getCampaign(userId: number, rawId: unknown) {
+  return toCampaign(await ownedCampaign(userId, rawId), true);
+}
+
+emailsRouter.post('/campaigns', async (req, res) => {
+  res.status(201).json(await createCampaign(uid(req), req.body));
+});
 emailsRouter.get('/campaigns/:id', async (req, res) => {
-  res.json(await toCampaign(await ownedCampaign(uid(req), req.params.id), true));
+  res.json(await getCampaign(uid(req), req.params.id));
 });
 
 emailsRouter.patch('/campaigns/:id', async (req, res) => {
@@ -406,9 +430,8 @@ emailsRouter.delete('/campaigns/:id', async (req, res) => {
  * this email is already due (enrollment + cumulative delays in the past) get it now; false: they skip it. Subscribers
  * who have not reached it yet get it in both cases.
  */
-emailsRouter.post('/campaigns/:id/emails', async (req, res) => {
-  const userId = uid(req);
-  const c = await ownedCampaign(userId, req.params.id);
+export async function addCampaignEmail(userId: number, rawId: unknown, input: unknown) {
+  const c = await ownedCampaign(userId, rawId);
   const body = z
     .object({
       subject: subjectSchema,
@@ -417,7 +440,7 @@ emailsRouter.post('/campaigns/:id/emails', async (req, res) => {
       content: pageContentSchema.optional(),
       apply_to_existing: z.boolean().default(true),
     })
-    .parse(req.body);
+    .parse(input);
   if (body.condition && 'tag_id' in body.condition) await assertTag(userId, body.condition.tag_id);
   const { row, backfilled } = await db.transaction().execute(async (trx) => {
     // serialise concurrent additions to the same campaign (positions)
@@ -437,7 +460,11 @@ emailsRouter.post('/campaigns/:id/emails', async (req, res) => {
     const backfilled = await backfillEmail(c.id, row.id, body.apply_to_existing, trx);
     return { row, backfilled };
   });
-  res.status(201).json({ ...(await campaignEmailWithStats(row)), backfilled });
+  return { ...(await campaignEmailWithStats(row)), backfilled };
+}
+
+emailsRouter.post('/campaigns/:id/emails', async (req, res) => {
+  res.status(201).json(await addCampaignEmail(uid(req), req.params.id, req.body));
 });
 
 emailsRouter.post('/campaigns/:id/emails/reorder', async (req, res) => {
@@ -456,9 +483,8 @@ emailsRouter.post('/campaigns/:id/emails/reorder', async (req, res) => {
   res.json(await toCampaign((await ownedCampaign(userId, c.id)), true));
 });
 
-emailsRouter.patch('/campaign-emails/:id', async (req, res) => {
-  const userId = uid(req);
-  const e = await ownedCampaignEmail(userId, req.params.id);
+export async function updateCampaignEmail(userId: number, rawId: unknown, input: unknown) {
+  const e = await ownedCampaignEmail(userId, rawId);
   const body = z
     .object({
       subject: subjectSchema.optional(),
@@ -466,7 +492,7 @@ emailsRouter.patch('/campaign-emails/:id', async (req, res) => {
       delay_days: z.number().int().min(0).max(3650).optional(),
       condition: conditionSchema.nullable().optional(),
     })
-    .parse(req.body);
+    .parse(input);
   if (body.condition && 'tag_id' in body.condition) await assertTag(userId, body.condition.tag_id);
   const row = await db.transaction().execute(async (trx) => {
     const row = await trx
@@ -488,7 +514,11 @@ emailsRouter.patch('/campaign-emails/:id', async (req, res) => {
     }
     return row;
   });
-  res.json(await campaignEmailWithStats(row));
+  return campaignEmailWithStats(row);
+}
+
+emailsRouter.patch('/campaign-emails/:id', async (req, res) => {
+  res.json(await updateCampaignEmail(uid(req), req.params.id, req.body));
 });
 
 emailsRouter.delete('/campaign-emails/:id', async (req, res) => {
