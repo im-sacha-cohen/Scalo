@@ -328,7 +328,7 @@ function buildServer(req: Request, token: string, scopes: OAuthScope[], ws: Work
     const input = ws.kind === 'all' ? { workspace_id: id('Espace de travail sur lequel agir (voir list_workspaces)'), ...t.input } : t.input;
     server.registerTool(t.name, { title: t.title, description: `${t.description} (scope requis : ${t.scope})`, inputSchema: input, annotations: annotations(t.readOnly) }, async (raw: unknown) => {
       if (!scopes.includes(t.scope)) {
-        return result(`Scope « ${t.scope} » requis : l’application connectée n’a pas cette autorisation. Déconnectez puis reconnectez Scalo dans Claude pour l’accorder (ou ajoutez ce scope à l’application dans Développeurs).`, true);
+        return result(`Scope « ${t.scope} » requis : l’application connectée n’a pas cette autorisation. Déconnectez puis reconnectez Scalo dans votre client MCP pour l’accorder (ou ajoutez ce scope à l’application dans Développeurs).`, true);
       }
       const { workspace_id, ...args } = (raw ?? {}) as Record<string, unknown>;
       const target = ws.kind === 'one' ? ws.workspace : ws.workspaces.find((w) => w.id === workspace_id);

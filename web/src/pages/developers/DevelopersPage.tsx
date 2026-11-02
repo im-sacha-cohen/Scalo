@@ -1,18 +1,22 @@
-// `/developers` — applications registered by the user on the OAuth 2.0 authorization server + documentation.
+// `/developers` — one tab per way to plug into Scalo (MCP server, REST API, OAuth 2.0) and the applications registered
+// by the user on the authorization server. The tab lives in the URL (?tab=) so it can be linked.
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router';
-import { Blocks, ChevronRight, Plus } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import { Blocks, Braces, ChevronRight, KeyRound, Plug, Plus } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useLoad } from '../../lib/hooks';
 import { fmtDate } from '../../lib/format';
-import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, PageLoader } from '../../components/ui';
+import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, PageLoader, Tabs } from '../../components/ui';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 import { AppLogo } from '../oauth/common';
 import { AppForm, emptyApp } from './AppForm';
-import { OAuthDocs } from './Docs';
+import { ApiDocs, OAuthDocs } from './Docs';
 import { McpDocs } from './McpDocs';
 import { SecretModal } from './SecretModal';
+
+const TABS = ['mcp', 'api', 'oauth', 'apps'] as const;
+type Tab = (typeof TABS)[number];
 
 export function DevelopersPage() {
   const toast = useToast();
@@ -20,6 +24,9 @@ export function DevelopersPage() {
   const { data, error, loading, reload } = useLoad(() => api.developerApps(), []);
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<{ id: number; clientId: string; secret: string } | null>(null);
+  const [params, setParams] = useSearchParams();
+  const tab = (TABS.some((t) => t === params.get('tab')) ? params.get('tab') : 'mcp') as Tab;
+  const setTab = (t: Tab) => setParams(t === 'mcp' ? {} : { tab: t }, { replace: true });
 
   if (loading && !data) return <PageLoader />;
   if (error && !data) return <ErrorState message={error} onRetry={reload} />;
@@ -29,28 +36,43 @@ export function DevelopersPage() {
     <>
       <PageHeader
         title="Développeurs"
-        description="Créez des applications qui accèdent aux comptes scalo avec l’accord de leurs utilisateurs (OAuth 2.0)."
+        description="Branchez vos outils sur Scalo : un client MCP en collant une URL, ou votre propre code avec l’API REST."
         actions={
-          <Button icon={Plus} onClick={() => setCreating(true)}>
-            Nouvelle application
-          </Button>
+          tab === 'apps' && apps.length > 0 ? (
+            <Button icon={Plus} onClick={() => setCreating(true)}>
+              Nouvelle application
+            </Button>
+          ) : undefined
         }
       />
 
-      <div className="space-y-6">
-        {apps.length === 0 ? (
-          <Card>
-            <EmptyState
-              icon={Blocks}
-              title="Aucune application"
-              description="Enregistrez une application (intégration, script, partenaire) pour obtenir un client_id et connecter des comptes via OAuth."
-              action={
-                <Button icon={Plus} onClick={() => setCreating(true)}>
-                  Nouvelle application
-                </Button>
-              }
-            />
-          </Card>
+      <Tabs
+        className="scalo-scroll mb-8 overflow-x-auto"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: 'mcp', label: 'Serveur MCP', icon: Plug },
+          { id: 'api', label: 'API REST', icon: Braces },
+          { id: 'oauth', label: 'OAuth 2.0', icon: KeyRound },
+          { id: 'apps', label: 'Applications', icon: Blocks, count: apps.length },
+        ]}
+      />
+
+      {tab === 'mcp' && <McpDocs onCreateApp={() => setCreating(true)} />}
+      {tab === 'api' && <ApiDocs onOAuth={() => setTab('oauth')} />}
+      {tab === 'oauth' && <OAuthDocs />}
+      {tab === 'apps' &&
+        (apps.length === 0 ? (
+          <EmptyState
+            icon={Blocks}
+            title="Aucune application"
+            description="Une application donne un client_id pour connecter des comptes Scalo par OAuth : votre intégration, un script, un partenaire ou un client MCP hébergé."
+            action={
+              <Button icon={Plus} onClick={() => setCreating(true)}>
+                Nouvelle application
+              </Button>
+            }
+          />
         ) : (
           <Card padded={false}>
             <ul className="divide-y divide-slate-100">
@@ -77,10 +99,7 @@ export function DevelopersPage() {
               ))}
             </ul>
           </Card>
-        )}
-        <McpDocs />
-        <OAuthDocs />
-      </div>
+        ))}
 
       <Modal open={creating} onClose={() => setCreating(false)} title="Nouvelle application" size="lg">
         <AppForm

@@ -113,7 +113,7 @@ export function selfRegisteredRedirectError(raw: string): string | null {
   if (err) return err;
   const u = new URL(raw);
   if (u.protocol === 'http:' && LOOPBACK.has(u.hostname)) return null;
-  return 'Seules les adresses de Claude et localhost peuvent s’enregistrer automatiquement : créez une application dans Développeurs';
+  return 'Cette adresse de redirection ne peut pas s’enregistrer automatiquement : créez une application dans Développeurs';
 }
 
 /** Name shown on the consent screen: a remote callback can only be Claude, a local tool names itself. */

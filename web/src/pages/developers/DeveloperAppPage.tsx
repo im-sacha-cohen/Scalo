@@ -11,7 +11,7 @@ import { useToast } from '../../components/Toast';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { AppLogo, CodeBlock, CopyValue } from '../oauth/common';
 import { AppForm, TEST_CALLBACK } from './AppForm';
-import { ORIGIN } from './Docs';
+import { ORIGIN } from './doc-ui';
 import { SecretModal } from './SecretModal';
 
 const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
