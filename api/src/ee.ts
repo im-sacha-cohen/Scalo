@@ -21,8 +21,11 @@ export interface PoweredBy {
 
 /** What `ee/api/src/index.ts` must return from its exported `register()`. */
 export interface EeApi {
-  /** Session user → the account he acts for. null: his own account (owner). May throw an HttpError (403). */
-  resolveActor(userId: number): Promise<{ accountId: number; role: AccountRole } | null>;
+  /**
+   * Session user → the account he acts for as a team member (`accountId`: that account only; undefined: his team
+   * account). null: not a member (of that account). May throw an HttpError (403).
+   */
+  resolveActor(userId: number, accountId?: number): Promise<{ accountId: number; role: AccountRole } | null>;
   /** Routes mounted under /api before authentication (invitation acceptance). Must call next() for unknown paths. */
   publicRouter: RequestHandler;
   /** Routes mounted under /api after authentication and the role check. Must call next() for unknown paths. */

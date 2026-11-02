@@ -27,15 +27,62 @@ import type {
   OAuthConsentRequest,
   OAuthScope,
   Tag,
+  Workspace,
+  WorkspaceList,
   User,
 } from '@scalo/shared';
 
 export type StepAccessInput = Omit<StepAccess, 'password_set'> & { password?: string };
 
 const TOKEN_KEY = 'scalo_token';
+/** Workspace the app works on (X-Scalo-Workspace); none = the person's own account. */
+const WORKSPACE_KEY = 'scalo_workspace';
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
-export const setToken = (t: string | null) => (t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY));
+export const setToken = (t: string | null) => {
+  // a new session (or none) starts on the person's own account
+  localStorage.removeItem(WORKSPACE_KEY);
+  if (t) localStorage.setItem(TOKEN_KEY, t);
+  else localStorage.removeItem(TOKEN_KEY);
+};
+
+export const getWorkspace = () => localStorage.getItem(WORKSPACE_KEY);
+
+/**
+ * The same page in another workspace. A page about one item (`/funnels/12/steps/3/edit`, `/sales/orders/7`) belongs
+ * to the previous workspace: back to its section (`/funnels`, `/sales`). The query string is kept unless it points at
+ * an item (`?tag_id=5`); the hash (`/settings#compte`) always.
+ */
+export function samePageElsewhere(loc: Pick<Location, 'pathname' | 'search' | 'hash'> = window.location): string {
+  const segments = loc.pathname.split('/').filter(Boolean);
+  const itemPage = segments.some((s) => /^\d+$/.test(s));
+  const path = itemPage ? `/${segments[0]}` : loc.pathname;
+  const params = new URLSearchParams(loc.search);
+  const keepSearch = !itemPage && ![...params.values()].some((v) => /^\d+$/.test(v));
+  return `${path}${keepSearch ? loc.search : ''}${loc.hash}`;
+}
+
+/** Switches workspace: every screen reloads on the new one (nothing of the previous business stays in memory). */
+export function switchWorkspace(id: number, to = samePageElsewhere()) {
+  localStorage.setItem(WORKSPACE_KEY, String(id));
+  window.location.assign(to);
+}
+
+/** Session + workspace headers of every API call. */
+export function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const workspace = getWorkspace();
+  if (workspace) headers['X-Scalo-Workspace'] = workspace;
+  return headers;
+}
+
+/** The stored workspace was deleted (or access removed): back to the person's own account. */
+function handleWorkspaceGone() {
+  localStorage.removeItem(WORKSPACE_KEY);
+  window.location.assign('/dashboard');
+}
 
 export class ApiError extends Error {
   status: number;
@@ -58,9 +105,7 @@ function handleUnauthorized(path: string) {
 
 /** Low-level request. Returns the raw Response for non-JSON bodies. */
 export async function rawRequest(method: Method, path: string, body?: unknown): Promise<Response> {
-  const headers: Record<string, string> = {};
-  const token = getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const headers = authHeaders();
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   let res: Response;
   try {
@@ -74,6 +119,7 @@ export async function rawRequest(method: Method, path: string, body?: unknown): 
     try {
       const data = await res.json();
       if (data && typeof data.error === 'string') message = data.error;
+      if (res.status === 403 && data?.code === 'workspace_unavailable') handleWorkspaceGone();
     } catch {
       /* not JSON */
     }
@@ -126,7 +172,13 @@ export const api = {
 
   // OAuth authorization server: consent screen, connected applications, developer apps
   oauthRequest: (id: string) => request<OAuthConsentRequest>('GET', `/oauth/requests/${encodeURIComponent(id)}`),
-  oauthConsent: (request_id: string, decision: 'approve' | 'deny') => request<{ redirect_to: string }>('POST', '/oauth/consent', { request_id, decision }),
+  oauthConsent: (request_id: string, decision: 'approve' | 'deny', workspace_id?: number, all_workspaces?: boolean) =>
+    request<{ redirect_to: string }>('POST', '/oauth/consent', { request_id, decision, workspace_id, all_workspaces }),
+
+  // workspaces (several businesses per person)
+  workspaces: () => request<WorkspaceList>('GET', '/workspaces'),
+  createWorkspace: (name: string) => request<Workspace>('POST', '/workspaces', { name }),
+  renameWorkspace: (id: number, name: string) => request<Workspace>('PATCH', `/workspaces/${id}`, { name }),
   oauthAuthorizations: () => request<OAuthAuthorization[]>('GET', '/oauth/authorizations'),
   revokeOAuthAuthorization: (clientId: string) => request<Ok>('DELETE', `/oauth/authorizations/${encodeURIComponent(clientId)}`),
   developerApps: () => request<OAuthApp[]>('GET', '/developer/apps'),
@@ -234,9 +286,7 @@ export interface UploadItem { name: string; url: string; size: number; created_a
 
 async function uploadImage(file: Blob): Promise<UploadItem> {
   if (file.size > 8 * 1024 * 1024) throw new ApiError('Image trop lourde (8 Mo maximum)', 413);
-  const headers: Record<string, string> = { 'Content-Type': file.type || 'application/octet-stream' };
-  const token = getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const headers: Record<string, string> = { ...authHeaders(), 'Content-Type': file.type || 'application/octet-stream' };
   let res: Response;
   try {
     res = await fetch('/api/uploads', { method: 'POST', headers, body: file });

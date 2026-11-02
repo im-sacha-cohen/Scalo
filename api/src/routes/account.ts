@@ -1,5 +1,6 @@
 // Paramètres → Données et compte (session JWT, under /api): summary, GDPR export, deletion of all the data, deletion
-// of the account. Reserved to the owner of the account: a team member gets 403, even an administrator (`account` is
+// of the account — of the workspace the request works on (deleting the first account of a person deletes the person
+// and all his workspaces, see services/account.ts). Reserved to the owner of the account: a team member gets 403, even an administrator (`account` is
 // also an owner-only area of access.ts). Deletions require the password (rate limited) and the email of the account.
 import { Router, type Request, type Response } from 'express';
 import bcrypt from 'bcryptjs';
@@ -15,20 +16,22 @@ const MIN15 = 15 * 60_000;
 export const ACCOUNT_PASSWORD_LIMIT = { max: 5, windowMs: MIN15 };
 const EXPORT_LIMIT = { max: 10, windowMs: 60 * 60_000 };
 
+/** The account (workspace) the request works on, if the signed-in person owns it. */
 function ownerId(req: Request): number {
   const userId = uid(req);
-  if (req.role !== 'owner' || req.actorId !== userId) throw new HttpError(403, OWNER_ONLY);
+  if (req.role !== 'owner') throw new HttpError(403, OWNER_ONLY);
   return userId;
 }
 
 const deletionSchema = z.object({ password: z.string().min(1, 'Saisissez votre mot de passe').max(200), confirm: z.string().trim().max(254) });
 
-/** Password (rate limited, counted before the comparison) + confirmation word = the email of the account. */
-async function checkDeletion(req: Request, res: Response, userId: number) {
+/** Password of the owner (rate limited, counted before the comparison) + confirmation word = his email. */
+async function checkDeletion(req: Request, res: Response) {
   const body = deletionSchema.parse(req.body);
-  const key = `account-password:${userId}`;
+  const personId = req.actorId ?? uid(req);
+  const key = `account-password:${personId}`;
   await enforce(res, [[key, ACCOUNT_PASSWORD_LIMIT]]);
-  const user = await db.selectFrom('users').select(['email', 'password_hash']).where('id', '=', userId).executeTakeFirstOrThrow();
+  const user = await db.selectFrom('users').select(['email', 'password_hash']).where('id', '=', personId).executeTakeFirstOrThrow();
   // 403, not 401: the session is valid, the web app must not sign the person out
   if (!(await bcrypt.compare(body.password, user.password_hash))) throw new HttpError(403, 'Mot de passe incorrect');
   await clear(key);
@@ -56,13 +59,13 @@ export function createAccountRouter(opts: DeletionOptions = {}) {
 
   r.post('/account/reset', async (req, res) => {
     const userId = ownerId(req);
-    await checkDeletion(req, res, userId);
+    await checkDeletion(req, res);
     res.json({ ok: true, deleted: await resetAccountData(userId, opts) });
   });
 
   r.post('/account/delete', async (req, res) => {
     const userId = ownerId(req);
-    await checkDeletion(req, res, userId);
+    await checkDeletion(req, res);
     res.json({ ok: true, deleted: await deleteAccount(userId, opts) });
   });
 

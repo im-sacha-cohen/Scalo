@@ -5,6 +5,7 @@ import type { User } from '@scalo/shared';
 import { db, isUniqueViolation, nowIso, type Db } from '../db';
 import { env } from '../env';
 import { getSettingsRow } from '../services/email';
+import { createPersonalAccount } from '../services/workspaces';
 import { clear, enforce, LIMITS, refund } from '../services/ratelimit';
 import { HttpError, requireAuth, signToken, uid } from '../util';
 
@@ -53,6 +54,7 @@ export function createAuthRouter() {
     try {
       id = await db.transaction().execute(async (trx) => {
         const user = await trx.insertInto('users').values({ email, password_hash: hash, name: body.name, created_at: nowIso() }).returning('id').executeTakeFirstOrThrow();
+        await createPersonalAccount(trx, { id: user.id, name: body.name });
         await getSettingsRow(user.id, trx); // default settings row
         return user.id;
       });

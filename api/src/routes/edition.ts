@@ -5,6 +5,7 @@ import { Router, type NextFunction, type Request, type RequestHandler, type Resp
 import { NO_LICENSE, type EditionInfo } from '@scalo/shared';
 import { db } from '../db';
 import { ee, loadEe } from '../ee';
+import { accountInfo } from '../services/workspaces';
 import { HttpError, uid } from '../util';
 
 /** Mounted under /api before authentication: loads the extension once, then its public routes (if any). */
@@ -23,10 +24,9 @@ export function editionGate(): RequestHandler[] {
   router.get('/edition', async (req, res) => {
     const accountId = uid(req);
     const actorId = req.actorId ?? accountId;
-    const people = await db.selectFrom('users').select(['id', 'name', 'email']).where('id', 'in', [accountId, actorId]).execute();
-    const account = people.find((p) => p.id === accountId);
-    const actor = people.find((p) => p.id === actorId);
-    if (!account || !actor) throw new HttpError(401, 'Session invalide');
+    const [acc, actor] = await Promise.all([accountInfo(accountId), db.selectFrom('users').select(['id', 'name', 'email']).where('id', '=', actorId).executeTakeFirst()]);
+    if (!acc || !actor) throw new HttpError(401, 'Session invalide');
+    const account = { id: acc.id, name: acc.name, email: acc.email };
     const ext = ee();
     const info: EditionInfo = {
       edition: ext ? 'enterprise' : 'community',

@@ -6,6 +6,7 @@ import { apiPath, ROLE_DENIED, roleAllows } from './access';
 import { db } from './db';
 import { loadEe } from './ee';
 import { env } from './env';
+import { resolveWorkspace, WORKSPACE_HEADER } from './workspace-access';
 
 z.config(z.locales.fr());
 
@@ -13,7 +14,8 @@ export const JWT_SECRET = env.JWT_SECRET;
 export const PUBLIC_URL = env.PUBLIC_URL;
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  /** `code`: machine-readable reason, returned next to `error` (e.g. `workspace_unavailable`). */
+  constructor(public status: number, message: string, public code?: string) {
     super(message);
   }
 }
@@ -58,19 +60,22 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     throw new HttpError(401, 'Session expirée ou invalide');
   }
   if (!Number.isSafeInteger(id) || id <= 0) throw new HttpError(401, 'Session invalide');
-  const exists = await db.selectFrom('users').select('id').where('id', '=', id).executeTakeFirst();
-  if (!exists) throw new HttpError(401, 'Session invalide');
-  req.userId = id;
+  // the workspace the web app works on (several businesses per person, see workspace-access.ts)
+  const raw = req.headers[WORKSPACE_HEADER];
+  const wanted = typeof raw === 'string' && raw !== '' ? Number(raw) : undefined;
+  if (wanted !== undefined && (!Number.isSafeInteger(wanted) || wanted <= 0)) throw new HttpError(400, 'Espace de travail invalide');
+  const access = await resolveWorkspace(id, wanted);
+  if (access === 'no-person') throw new HttpError(401, 'Session invalide');
+  if (!access) {
+    if (wanted !== undefined) throw new HttpError(403, 'Cet espace de travail n’existe plus ou vous n’y avez pas accès', 'workspace_unavailable');
+    throw new HttpError(401, 'Session invalide');
+  }
+  req.userId = access.accountId;
   req.actorId = id;
-  req.role = 'owner';
-  // Enterprise edition only: a team member acts on behalf of the account he belongs to. No-op otherwise.
+  req.role = access.role;
+  // Enterprise edition only: audit trail + role of team members. No-op otherwise.
   const ext = await loadEe();
   if (ext) {
-    const actor = await ext.resolveActor(id);
-    if (actor) {
-      req.userId = actor.accountId;
-      req.role = actor.role;
-    }
     ext.onRequest(req, res); // audit trail
     // Generic rule by HTTP method / area (access.ts): covers every authenticated route, however it is mounted.
     if (!roleAllows(req.role, req.method, apiPath(req.originalUrl))) throw new HttpError(403, ROLE_DENIED[req.role]);

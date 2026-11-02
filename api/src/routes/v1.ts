@@ -7,6 +7,8 @@ import { z } from 'zod';
 import type { OAuthScope } from '@scalo/shared';
 import { db } from '../db';
 import { env } from '../env';
+import { accountInfoOrThrow, tokenWorkspace } from '../services/workspaces';
+import { WORKSPACE_HEADER } from '../workspace-access';
 import { addTag, getContact, getContactRow, getOrCreateTag, enrollInCampaign, normEmail, removeTag, upsertContact } from '../services/contacts';
 import { findAccessToken, touchToken } from '../services/oauth-server';
 import { hit, LIMITS } from '../services/ratelimit';
@@ -51,7 +53,14 @@ async function requireAccessToken(req: Request, res: Response, next: NextFunctio
   }
   const t = await findAccessToken(m[1]);
   if (!t) return bearerError(res, 401, 'invalid_token', 'Jeton d’accès invalide, expiré ou révoqué');
-  req.oauth = { tokenId: t.id, userId: t.user_id, clientId: t.client_id, publicClientId: t.public_client_id, scopes: t.scopes };
+  // X-Scalo-Workspace: the workspace of the call, for a token of every workspace (default: the one it was granted from)
+  const raw = req.headers[WORKSPACE_HEADER];
+  if (raw !== undefined && (typeof raw !== 'string' || !/^\d{1,15}$/.test(raw))) return res.status(400).json({ error: 'invalid_request', error_description: `En-tête ${WORKSPACE_HEADER} invalide` });
+  const workspace = await tokenWorkspace(t, raw === undefined ? undefined : Number(raw));
+  if (workspace === null) {
+    return res.status(403).json({ error: 'workspace_forbidden', error_description: 'Cette autorisation ne donne pas accès à cet espace de travail (ou vous n’en êtes plus propriétaire ni administrateur)' });
+  }
+  req.oauth = { tokenId: t.id, userId: workspace, clientId: t.client_id, publicClientId: t.public_client_id, scopes: t.scopes };
 
   // per authorization (application + account): refreshing the token does not reset the counter
   const limit = LIMITS.apiV1;
@@ -95,8 +104,9 @@ export function createV1Router() {
   r.use(requireAccessToken);
 
   r.get('/me', need('profile'), async (req, res) => {
-    const u = await db.selectFrom('users').select(['id', 'email', 'name', 'created_at']).where('id', '=', grant(req).userId).executeTakeFirstOrThrow();
-    res.json(u);
+    // the workspace the token is bound to (its name) and the address of its owner
+    const { id, email, name, created_at } = await accountInfoOrThrow(grant(req).userId);
+    res.json({ id, email, name, created_at });
   });
 
   // ----- contacts -----

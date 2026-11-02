@@ -29,7 +29,7 @@ onboardingRouter.put('/onboarding', async (req, res) => {
   const body = updateSchema.parse(req.body);
   // The welcome flow belongs to the account owner; a team member can only hide / reopen the checklist
   // (read-only members are already stopped by the generic role rule, see access.ts).
-  if (actor.actorId !== accountId && Object.keys(body).some((k) => k !== 'checklist_hidden')) {
+  if (actor.role !== 'owner' && Object.keys(body).some((k) => k !== 'checklist_hidden')) {
     throw new HttpError(403, 'Le parcours de bienvenue est réservé au propriétaire du compte');
   }
   await updateOnboarding(accountId, body);

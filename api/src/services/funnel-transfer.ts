@@ -285,8 +285,8 @@ export async function funnelByShareToken(token: string) {
   if (!SHARE_TOKEN_RE.test(token)) return undefined;
   return db
     .selectFrom('funnels as f')
-    .innerJoin('users as u', 'u.id', 'f.user_id')
-    .select(['f.id', 'f.name', 'f.user_id', 'u.name as owner'])
+    .innerJoin('accounts as a', 'a.id', 'f.user_id')
+    .select(['f.id', 'f.name', 'f.user_id', 'a.name as owner'])
     .where('f.share_token_hash', '=', hashShareToken(token))
     .executeTakeFirst();
 }

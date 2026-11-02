@@ -4,7 +4,7 @@
 //   developers (owner only):  /api/developer/apps[/:id[/rotate-secret]]
 // These routes authenticate with the Authorization header (never cookies), so they are not exposed to CSRF.
 import crypto from 'node:crypto';
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { sql } from 'kysely';
 import { z } from 'zod';
 import { OAUTH_SCOPES, type OAuthApp, type OAuthAppWithSecret, type OAuthAuthorization, type OAuthConsentRequest, type OAuthScope } from '@scalo/shared';
@@ -21,6 +21,7 @@ import {
   sha256,
   withParams,
 } from '../services/oauth-server';
+import { canGrant, grantableWorkspaces as grantableOf, workspaceAccess } from '../services/workspaces';
 import { HttpError, notFound, paramId, uid } from '../util';
 
 export const oauthAccountRouter = Router();
@@ -34,7 +35,7 @@ async function findRequest(rawId: unknown) {
   const row = await db
     .selectFrom('oauth_authorization_requests as r')
     .innerJoin('oauth_clients as c', 'c.id', 'r.client_id')
-    .leftJoin('users as o', 'o.id', 'c.user_id')
+    .leftJoin('accounts as o', 'o.id', 'c.user_id')
     .select([
       'r.id_hash',
       'r.client_id',
@@ -45,6 +46,7 @@ async function findRequest(rawId: unknown) {
       'r.prompt_consent',
       'r.expires_at',
       'r.consumed_at',
+      'r.account_id',
       'c.client_id as public_client_id',
       'c.name',
       'c.description',
@@ -60,9 +62,30 @@ async function findRequest(rawId: unknown) {
   return { id, row };
 }
 
+// ---------- workspace of the authorization ----------
+// The access is granted to ONE workspace: the one the client imposed (MCP endpoint of a workspace), otherwise the one
+// picked on the screen (default: the workspace the person is working on). Or, when the client imposed none, to every
+// workspace of the person (« Tous mes espaces », migration 0018): the client then names the workspace of each call.
+// Owners and administrators only.
+const NO_ACCESS = 'Vous n’avez pas accès à l’espace de travail demandé par cette application (ou votre rôle ne permet pas de l’autoriser). Connectez-vous avec le compte qui le possède.';
+
+const actor = (req: Request) => req.actorId ?? uid(req);
+const grantableWorkspaces = (req: Request) => grantableOf(actor(req), { accountId: uid(req), role: req.role ?? 'owner' });
+
+/** Workspace the decision applies to; 403 if the person may not grant access to it. */
+async function targetWorkspace(req: Request, imposed: number | null, picked?: number): Promise<number> {
+  const target = imposed ?? picked ?? uid(req);
+  const access = await workspaceAccess(actor(req), target);
+  if (!access || !canGrant(access.role)) throw new HttpError(403, NO_ACCESS);
+  return target;
+}
+
 oauthAccountRouter.get('/oauth/requests/:id', async (req, res) => {
-  const userId = uid(req);
   const { id, row } = await findRequest(req.params.id);
+  const userId = await targetWorkspace(req, row.account_id);
+  const choices = row.account_id === null ? await grantableWorkspaces(req) : [];
+  const target = row.account_id === null ? choices.find((w) => w.id === userId) : undefined;
+  const name = target?.name ?? (await db.selectFrom('accounts').select('name').where('id', '=', userId).executeTakeFirstOrThrow()).name;
   const consent = await db.selectFrom('oauth_consents').select('scopes').where('user_id', '=', userId).where('client_id', '=', row.client_id).executeTakeFirst();
   const out: OAuthConsentRequest = {
     request_id: id,
@@ -77,7 +100,11 @@ oauthAccountRouter.get('/oauth/requests/:id', async (req, res) => {
     },
     scopes: row.scopes as OAuthScope[],
     redirect_uri: row.redirect_uri,
-    remembered: !row.prompt_consent && !!consent && isSubset(row.scopes, consent.scopes),
+    // several workspaces to choose from: always ask (approving silently could connect the wrong business)
+    remembered: !row.prompt_consent && !!consent && isSubset(row.scopes, consent.scopes) && choices.length <= 1,
+    workspace: { id: userId, name, locked: row.account_id !== null },
+    workspaces: choices.map((w) => ({ id: w.id, name: w.name })),
+    can_grant_all: choices.length > 1,
     prompt_consent: row.prompt_consent,
     expires_at: row.expires_at,
   };
@@ -85,12 +112,22 @@ oauthAccountRouter.get('/oauth/requests/:id', async (req, res) => {
   res.json(out);
 });
 
-const consentSchema = z.object({ request_id: z.string().min(1).max(100), decision: z.enum(['approve', 'deny']) });
+const consentSchema = z.object({
+  request_id: z.string().min(1).max(100),
+  decision: z.enum(['approve', 'deny']),
+  /** Workspace picked on the screen (ignored when the client imposed one). */
+  workspace_id: z.number().int().positive().optional(),
+  /** Every workspace of the person (`workspace_id`: the one it is granted from). Not when the client imposed one. */
+  all_workspaces: z.boolean().optional(),
+});
 
 oauthAccountRouter.post('/oauth/consent', async (req, res) => {
-  const userId = uid(req);
   const body = consentSchema.parse(req.body);
-  await findRequest(body.request_id); // 404 / 410 with a clear message
+  const { row } = await findRequest(body.request_id); // 404 / 410 with a clear message
+  const all = body.decision === 'approve' && body.all_workspaces === true;
+  if (all && row.account_id !== null) throw new HttpError(400, 'Cette application demande l’accès à un seul espace de travail');
+  const userId = body.decision === 'approve' ? await targetWorkspace(req, row.account_id, body.workspace_id) : uid(req);
+  const personId = all ? actor(req) : null;
   // single use: consumed atomically (a double click can't issue two codes)
   const r = await db
     .updateTable('oauth_authorization_requests')
@@ -112,10 +149,12 @@ oauthAccountRouter.post('/oauth/consent', async (req, res) => {
     // remembered consent = union of everything the user granted to this application
     await trx
       .insertInto('oauth_consents')
-      .values({ user_id: userId, client_id: r.client_id, scopes: r.scopes })
+      .values({ user_id: userId, client_id: r.client_id, scopes: r.scopes, person_id: personId })
       .onConflict((oc) =>
         oc.columns(['user_id', 'client_id']).doUpdateSet({
           scopes: sql<string[]>`ARRAY(SELECT DISTINCT unnest(oauth_consents.scopes || excluded.scopes))`,
+          // the latest decision says which workspaces the application reaches
+          person_id: sql<number | null>`excluded.person_id`,
           updated_at: sql`now()`,
         }),
       )
@@ -126,6 +165,7 @@ oauthAccountRouter.post('/oauth/consent', async (req, res) => {
         code_hash: code.hash,
         client_id: r.client_id,
         user_id: userId,
+        person_id: personId,
         redirect_uri: r.redirect_uri,
         scopes: r.scopes,
         code_challenge: r.code_challenge,
@@ -143,14 +183,16 @@ oauthAccountRouter.get('/oauth/authorizations', async (req, res) => {
   const rows = await db
     .selectFrom('oauth_consents as g')
     .innerJoin('oauth_clients as c', 'c.id', 'g.client_id')
-    .leftJoin('users as o', 'o.id', 'c.user_id')
-    .select(['g.scopes', 'g.created_at', 'g.updated_at', 'g.last_used_at', 'c.client_id', 'c.name', 'c.description', 'c.website', 'c.logo_url', 'o.name as owner_name'])
-    .where('g.user_id', '=', uid(req))
+    .leftJoin('accounts as o', 'o.id', 'c.user_id')
+    .select(['g.scopes', 'g.person_id', 'g.created_at', 'g.updated_at', 'g.last_used_at', 'c.client_id', 'c.name', 'c.description', 'c.website', 'c.logo_url', 'o.name as owner_name'])
+    // granted from this workspace, or by this person to all of his workspaces
+    .where((eb) => eb.or([eb('g.user_id', '=', uid(req)), eb('g.person_id', '=', actor(req))]))
     .orderBy('g.updated_at', 'desc')
     .execute();
   const out: OAuthAuthorization[] = rows.map((r) => ({
     client: { client_id: r.client_id, name: r.name, description: r.description, website: r.website, logo_url: r.logo_url, owner_name: r.owner_name },
     scopes: OAUTH_SCOPES.filter((x) => r.scopes.includes(x)),
+    all_workspaces: r.person_id !== null,
     granted_at: r.created_at,
     updated_at: r.updated_at,
     last_used_at: r.last_used_at,
@@ -162,8 +204,15 @@ oauthAccountRouter.delete('/oauth/authorizations/:clientId', async (req, res) =>
   const userId = uid(req);
   const client = await db.selectFrom('oauth_clients').select('id').where('client_id', '=', String(req.params.clientId)).executeTakeFirst();
   if (!client) throw notFound('Application');
-  const hadConsent = await revokeGrant(userId, client.id);
-  if (!hadConsent) throw notFound('Autorisation');
+  // the grants listed here: from this workspace, and those of this person to all of his workspaces
+  const grants = await db
+    .selectFrom('oauth_consents')
+    .select('user_id')
+    .where('client_id', '=', client.id)
+    .where((eb) => eb.or([eb('user_id', '=', userId), eb('person_id', '=', actor(req))]))
+    .execute();
+  if (!grants.length) throw notFound('Autorisation');
+  for (const g of grants) await revokeGrant(g.user_id, client.id);
   res.json({ ok: true });
 });
 

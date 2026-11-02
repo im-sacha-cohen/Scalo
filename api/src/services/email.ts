@@ -10,8 +10,13 @@ export type { SettingsRow };
 export async function getSettingsRow(userId: number, ex: Db = db): Promise<SettingsRow> {
   const row = await ex.selectFrom('settings').selectAll().where('user_id', '=', userId).executeTakeFirst();
   if (row) return row;
-  const user = await ex.selectFrom('users').select(['name', 'email']).where('id', '=', userId).executeTakeFirst();
-  if (!user) throw new Error(`Utilisateur ${userId} introuvable`);
+  const user = await ex
+    .selectFrom('accounts as a')
+    .innerJoin('users as u', 'u.id', 'a.owner_id')
+    .select(['a.name', 'u.email'])
+    .where('a.id', '=', userId)
+    .executeTakeFirst();
+  if (!user) throw new Error(`Compte ${userId} introuvable`);
   await ex
     .insertInto('settings')
     .values({ user_id: userId, sender_name: user.name, sender_email: user.email })

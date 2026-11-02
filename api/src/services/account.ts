@@ -1,10 +1,12 @@
 // Account data: GDPR export (ZIP archive), deletion of all the data (the account stays, empty), deletion of the account.
+// "Account" = one workspace (accounts row, see migration 0017). Deleting the first account of a person deletes the
+// person and all his workspaces; deleting another workspace deletes only that one.
 //
 // Deletions (resetAccountData / deleteAccount):
 // 1. the sending queue of the account is paused, then we wait until no email of the account is being delivered by a
 //    live worker (an email already handed to the SMTP server cannot be recalled; one claimed afterwards is given back
 //    to the queue by the worker, which checks the pause before every email);
-// 2. ONE transaction: the `users` row is locked first (FOR UPDATE: every insert that references the account — a form
+// 2. ONE transaction: the `accounts` row is locked first (FOR UPDATE: every insert that references the account — a form
 //    submission, a scheduled newsletter, an import batch… — waits for us, then fails on its foreign key, or on the guard
 //    of its claim for the automation runs and import jobs, deleted here), then the data is deleted. All or nothing;
 // 3. after the commit only: files of the media library and of the lessons are removed from the disk.
@@ -19,6 +21,7 @@ import { contactsCsv } from '../routes/contacts';
 import { getSettingsRow, resetTransport } from './email';
 import { listFieldDefs } from './fields';
 import { createZip, type ZipEntry } from './zip';
+import { accountInfoOrThrow } from './workspaces';
 import { HttpError } from '../util';
 
 // ---------- files on disk ----------
@@ -55,9 +58,12 @@ function removeAccountFiles(userId: number) {
 
 export async function accountSummary(userId: number): Promise<AccountDataSummary> {
   const n = (table: string, where = sql`user_id = ${userId}`) => sql<number>`(SELECT count(*) FROM ${sql.table(table)} WHERE ${where})`;
-  const { rows } = await sql<Omit<AccountDataSummary['counts'], 'media_files' | 'files_bytes'> & { email: string; stripe: boolean; active_subscriptions: number }>`
+  const { rows } = await sql<Omit<AccountDataSummary['counts'], 'media_files' | 'files_bytes'> & { email: string; workspace_name: string; owner_id: number; others: number; stripe: boolean; active_subscriptions: number }>`
     SELECT
-      (SELECT email FROM users WHERE id = ${userId}) AS email,
+      (SELECT u.email FROM accounts a JOIN users u ON u.id = a.owner_id WHERE a.id = ${userId}) AS email,
+      (SELECT name FROM accounts WHERE id = ${userId}) AS workspace_name,
+      (SELECT owner_id FROM accounts WHERE id = ${userId}) AS owner_id,
+      (SELECT count(*) FROM accounts o WHERE o.owner_id = ${userId} AND o.id <> ${userId}) AS others,
       ${n('contacts')} AS contacts,
       ${n('tags')} AS tags,
       ${n('custom_fields')} AS custom_fields,
@@ -88,9 +94,10 @@ export async function accountSummary(userId: number): Promise<AccountDataSummary
   if (!r?.email) throw new HttpError(404, 'Compte introuvable');
   const media = listDir(mediaDir(userId));
   const lessonBytes = listDir(lessonFilesDir(userId)).reduce((s, f) => s + f.size, 0);
-  const { email, stripe, active_subscriptions, ...counts } = r;
+  const { email, workspace_name, owner_id, others, stripe, active_subscriptions, ...counts } = r;
   return {
     email,
+    workspace: { name: workspace_name, personal: owner_id === userId, others },
     counts: { ...counts, media_files: media.length, files_bytes: media.reduce((s, f) => s + f.size, 0) + lessonBytes },
     stripe_connected: stripe,
     active_subscriptions,
@@ -150,7 +157,7 @@ export async function exportAccount(userId: number): Promise<{ zip: Buffer; file
   const add = (name: string, data: unknown) => entries.push({ name, data: typeof data === 'string' ? data : json(data) });
 
   // --- account, settings (no secret) ---
-  const user = await db.selectFrom('users').select(['id', 'email', 'name', 'created_at']).where('id', '=', userId).executeTakeFirstOrThrow();
+  const { owner_id: _owner, ...user } = await accountInfoOrThrow(userId);
   const settings = await getSettingsRow(userId);
   const payment = await db.selectFrom('payment_settings').select(['mode', 'account_name', 'verified_at']).where('user_id', '=', userId).executeTakeFirst();
   const ai = await db.selectFrom('ai_settings').select(['updated_at']).where('user_id', '=', userId).executeTakeFirst();
@@ -425,7 +432,7 @@ const BUSY = 'Des emails de ce compte sont en cours d’envoi : réessayez dans 
 /** Locks the account row (see the header) and raises the statement timeout of this transaction. */
 async function lockAccount(trx: Db, userId: number) {
   await sql`SET LOCAL statement_timeout = '120s'`.execute(trx);
-  const u = await trx.selectFrom('users').select('id').where('id', '=', userId).forUpdate().executeTakeFirst();
+  const u = await trx.selectFrom('accounts').select('id').where('id', '=', userId).forUpdate().executeTakeFirst();
   if (!u) throw new HttpError(404, 'Compte introuvable');
 }
 
@@ -493,21 +500,30 @@ export async function resetAccountData(userId: number, opts: DeletionOptions = {
   return counts;
 }
 
-/** Deletes the account: its data, its settings, its OAuth applications and tokens, its team members and invitations. */
+/**
+ * Deletes the account: its data, its settings, its OAuth applications and tokens, its team members and invitations.
+ * The first account of a person (same id): his other workspaces first, then the person himself. Returns the counters
+ * of everything deleted.
+ */
 export async function deleteAccount(userId: number, opts: DeletionOptions = {}): Promise<Summary> {
+  const { owner_id: ownerId } = await accountInfoOrThrow(userId);
+  const personal = ownerId === userId;
+  const total = personal ? await deleteOtherWorkspaces(ownerId, opts) : null;
   const { counts } = await accountSummary(userId);
   const previous = await pauseSending(userId);
   try {
     if (!(await waitForDeliveries(userId, opts.waitMs ?? 20_000))) throw new HttpError(409, BUSY);
     await db.transaction().execute(async (trx) => {
       await lockAccount(trx, userId);
-      await deleteData(trx, userId); // explicit order first (foreign keys SET NULL), then the cascades of `users`
+      await deleteData(trx, userId); // explicit order first (foreign keys SET NULL), then the cascades of `accounts`
       // Enterprise edition: a member's login only exists for his membership (see ee/api/src/team.ts)
       await trx
         .deleteFrom('users')
         .where('id', 'in', trx.selectFrom('account_members').select('user_id').where('account_id', '=', userId))
         .execute();
-      await trx.deleteFrom('users').where('id', '=', userId).execute(); // settings, OAuth apps / tokens, invitations, audit log… (CASCADE)
+      // settings, OAuth apps / tokens, invitations, audit log… (CASCADE); the person with his own account
+      if (personal) await trx.deleteFrom('users').where('id', '=', userId).execute();
+      else await trx.deleteFrom('accounts').where('id', '=', userId).execute();
     });
   } catch (e) {
     await db.updateTable('settings').set(previous).where('user_id', '=', userId).where('paused_reason', '=', PAUSE_REASON).execute().catch(() => undefined);
@@ -516,5 +532,19 @@ export async function deleteAccount(userId: number, opts: DeletionOptions = {}):
   removeAccountFiles(userId);
   resetTransport(userId);
   console.log(`[account] compte ${userId} supprimé (${logLine(counts)}, ${counts.team_members} membre(s) d’équipe)`);
-  return counts;
+  return total ? addCounts(total, counts) : counts;
+}
+
+const addCounts = (a: Summary, b: Summary): Summary =>
+  Object.fromEntries(Object.entries(b).map(([k, v]) => [k, (a[k as keyof Summary] ?? 0) + v])) as Summary;
+
+/** The workspaces of a person other than his own account, deleted one by one (each in its own transaction). */
+async function deleteOtherWorkspaces(personId: number, opts: DeletionOptions): Promise<Summary | null> {
+  const others = await db.selectFrom('accounts').select('id').where('owner_id', '=', personId).where('id', '<>', personId).orderBy('id').execute();
+  let total: Summary | null = null;
+  for (const w of others) {
+    const c = await deleteAccount(w.id, opts);
+    total = total ? addCounts(total, c) : c;
+  }
+  return total;
 }

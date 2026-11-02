@@ -28,13 +28,15 @@ function noFrameConsent(): Plugin {
 
 // Only the protocol endpoints of the authorization server go to the API; /oauth/consent stays an SPA route.
 // (+ the MCP server endpoint, POST /mcp, authenticated with the same access tokens)
-const oauthProxy = { '^/oauth/(authorize|token|revoke|introspect)(\\?.*)?$': API, '/.well-known/': API, '^/mcp(\\?.*)?$': API };
+const oauthProxy = { '^/oauth/(authorize|token|revoke|introspect|register)(\\?.*)?$': API, '/.well-known/': API, '^/mcp(/\\d+)?(\\?.*)?$': API };
 
 export default defineConfig({
   plugins: [noFrameConsent(), react(), tailwindcss()],
   build: { chunkSizeWarningLimit: 1200 },
   server: {
     port: 5173,
+    // quick tunnels (`cloudflared tunnel --url http://localhost:5173`) to test the MCP server from claude.ai
+    allowedHosts: ['.trycloudflare.com'],
     proxy: {
       '/api': API,
       // trailing slashes so SPA routes that merely start with the letter are not proxied

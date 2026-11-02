@@ -6,7 +6,7 @@ import { CircleAlert, ExternalLink, ShieldCheck } from 'lucide-react';
 import { OAUTH_SCOPE_INFO, type OAuthConsentRequest } from '@scalo/shared';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
-import { Button, Spinner } from '../../components/ui';
+import { Button, Select, Spinner } from '../../components/ui';
 import { Logo } from '../../components/Layout';
 import { AppLogo } from './common';
 
@@ -41,6 +41,10 @@ export function ConsentPage() {
   const [data, setData] = useState<OAuthConsentRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<'approve' | 'deny' | null>(null);
+  /** Workspace the access is granted to (when the application did not impose one). */
+  const [workspaceId, setWorkspaceId] = useState<number | null>(null);
+  /** « Tous mes espaces »: the application names the workspace of each action. */
+  const [allWorkspaces, setAllWorkspaces] = useState(false);
   const started = useRef(false);
   // defense in depth against clickjacking (the server also sends frame-ancestors 'none' / X-Frame-Options)
   const framed = typeof window !== 'undefined' && window.top !== window.self;
@@ -48,7 +52,7 @@ export function ConsentPage() {
   const decide = async (decision: 'approve' | 'deny') => {
     setBusy(decision);
     try {
-      const { redirect_to } = await api.oauthConsent(requestId, decision);
+      const { redirect_to } = await api.oauthConsent(requestId, decision, workspaceId ?? undefined, allWorkspaces || undefined);
       window.location.assign(redirect_to);
     } catch (e) {
       setError((e as Error).message);
@@ -67,6 +71,7 @@ export function ConsentPage() {
       .oauthRequest(requestId)
       .then((r) => {
         setData(r);
+        setWorkspaceId(r.workspace.id);
         // already authorized with these scopes (and prompt=consent not requested): no need to ask again
         if (r.remembered) void decide('approve');
       })
@@ -109,12 +114,14 @@ export function ConsentPage() {
   }
 
   const c = data.client;
+  const picked = data.workspaces.find((w) => w.id === workspaceId)?.name ?? data.workspace.name;
   return (
     <Shell>
       <div className="flex flex-col items-center text-center">
         <AppLogo name={c.name} url={c.logo_url} size={56} />
         <h1 className="mt-4 text-lg font-semibold text-slate-900">
-          <span className="text-brand-700">{c.name}</span> souhaite accéder à votre compte
+          <span className="text-brand-700">{c.name}</span> souhaite accéder{' '}
+          {allWorkspaces ? 'à tous vos espaces' : data.workspaces.length > 1 || data.workspace.locked ? `à votre espace « ${picked} »` : 'à votre compte'}
         </h1>
         {c.owner_name && (
           <p className="mt-1 text-xs text-slate-500">
@@ -146,6 +153,41 @@ export function ConsentPage() {
           Changer de compte
         </button>
       </div>
+
+      {/* one workspace per authorization (the application only ever sees this business), or every workspace */}
+      <div className="mt-2 flex items-center gap-2.5 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+        <span className="text-slate-500">Espace :</span>
+        {data.workspace.locked || data.workspaces.length <= 1 ? (
+          <span className="min-w-0 flex-1 truncate font-medium text-slate-900">{data.workspace.name}</span>
+        ) : (
+          <Select
+            aria-label="Espace de travail auquel donner accès"
+            className="h-8 min-w-0 flex-1 py-0 text-sm"
+            value={allWorkspaces ? 'all' : String(workspaceId ?? data.workspace.id)}
+            onChange={(e) => {
+              const all = e.target.value === 'all';
+              setAllWorkspaces(all);
+              if (!all) setWorkspaceId(Number(e.target.value));
+            }}
+          >
+            {data.workspaces.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+            {data.can_grant_all && <option value="all">Tous mes espaces ({data.workspaces.length})</option>}
+          </Select>
+        )}
+      </div>
+      {data.workspace.locked && <p className="mt-1.5 text-xs text-slate-500">Cette connexion est réservée à cet espace : l’application n’aura aucun accès à vos autres espaces.</p>}
+      {allWorkspaces ? (
+        <p className="mt-1.5 text-xs text-slate-500">
+          L’application pourra agir sur chacun de vos espaces, y compris ceux que vous créerez plus tard. Elle devra indiquer l’espace à chaque action, et chaque réponse dit dans quel espace elle a agi.
+        </p>
+      ) : (
+        !data.workspace.locked &&
+        data.workspaces.length > 1 && <p className="mt-1.5 text-xs text-slate-500">L’application n’aura accès qu’à cet espace. Choisissez « Tous mes espaces » pour qu’elle puisse travailler sur chacun.</p>
+      )}
 
       <p className="mt-5 text-sm font-medium text-slate-900">Cette application pourra :</p>
       <ul className="mt-2 space-y-2.5">

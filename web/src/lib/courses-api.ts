@@ -1,6 +1,6 @@
 // Courses & members area endpoints (see SPEC.md, « Formations et espace membres »).
 import { LESSON_FILE_MAX_BYTES, type Course, type CourseStatus, type CourseStudent, type Lesson, type LessonFile, type MemberArea, type PageContent } from '@scalo/shared';
-import { ApiError, getToken, rawRequest, request } from './api';
+import { ApiError, authHeaders, rawRequest, request } from './api';
 
 type Ok = { ok: true };
 
@@ -74,9 +74,7 @@ export const coursesApi = {
 
 async function uploadLessonFile(lessonId: number, file: File): Promise<LessonFile> {
   if (file.size > LESSON_FILE_MAX_BYTES) throw new ApiError(`Fichier trop lourd (${Math.round(LESSON_FILE_MAX_BYTES / 1024 / 1024)} Mo maximum)`, 413);
-  const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' };
-  const token = getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const headers: Record<string, string> = { ...authHeaders(), 'Content-Type': 'application/octet-stream' };
   let res: Response;
   try {
     res = await fetch(`/api/lessons/${lessonId}/files?name=${encodeURIComponent(file.name)}`, { method: 'POST', headers, body: file });

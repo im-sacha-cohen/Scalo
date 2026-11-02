@@ -153,8 +153,8 @@ function checklist(goal: OnboardingGoal | null, f: Facts, hidden: boolean): Onbo
 }
 
 /**
- * `accountId`: the account the request works on; `actorId` / `role`: the signed-in person (different from the account
- * for a team member of the Enterprise edition, who never sees the welcome flow).
+ * `accountId`: the account the request works on; `actorId` / `role`: the signed-in person. Only the owner of the
+ * account (of each of his workspaces) sees the welcome flow, never a team member of the Enterprise edition.
  */
 export async function onboardingState(accountId: number, actor: { actorId: number; role: AccountRole }, ex: Db = db): Promise<OnboardingState> {
   const [row, f] = await Promise.all([
@@ -170,7 +170,7 @@ export async function onboardingState(accountId: number, actor: { actorId: numbe
         .where('f.user_id', '=', accountId)
         .executeTakeFirst()
     : undefined;
-  const member = actor.actorId !== accountId;
+  const member = actor.role !== 'owner';
   let step = row?.step ?? 'goal';
   if (step === 'live' && !funnel) step = 'funnel'; // the funnel of the flow was deleted meanwhile
   return {

@@ -149,12 +149,12 @@ const inSeconds = (s: number) => new Date(Date.now() + s * 1000).toISOString();
  */
 export async function issueTokens(
   ex: Db,
-  g: { clientId: number; userId: number; familyId: string; scopes: OAuthScope[]; refreshScopes?: OAuthScope[]; parentId?: number | null },
+  g: { clientId: number; userId: number; personId?: number | null; familyId: string; scopes: OAuthScope[]; refreshScopes?: OAuthScope[]; parentId?: number | null },
 ): Promise<IssuedTokens> {
   const access = newSecret(PREFIX.access);
   const refreshScopes = g.refreshScopes ?? g.scopes;
   const refresh = refreshScopes.includes('offline_access') ? newSecret(PREFIX.refresh) : null;
-  const common = { family_id: g.familyId, client_id: g.clientId, user_id: g.userId, parent_id: g.parentId ?? null };
+  const common = { family_id: g.familyId, client_id: g.clientId, user_id: g.userId, person_id: g.personId ?? null, parent_id: g.parentId ?? null };
   await ex
     .insertInto('oauth_tokens')
     .values([
@@ -197,7 +197,7 @@ export async function findAccessToken(token: string) {
   const row = await db
     .selectFrom('oauth_tokens as t')
     .innerJoin('oauth_clients as c', 'c.id', 't.client_id')
-    .select(['t.id', 't.user_id', 't.client_id', 't.scopes', 't.expires_at', 't.last_used_at', 't.family_id', 'c.client_id as public_client_id', 'c.scopes as client_scopes'])
+    .select(['t.id', 't.user_id', 't.person_id', 't.client_id', 't.scopes', 't.expires_at', 't.last_used_at', 't.family_id', 'c.client_id as public_client_id', 'c.scopes as client_scopes'])
     .where('t.token_hash', '=', sha256(token))
     .where('t.type', '=', 'access')
     .where('t.revoked_at', 'is', null)

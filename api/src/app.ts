@@ -38,6 +38,7 @@ import { editionGate, editionPublicGate } from './routes/edition';
 import { createSpaRouter } from './routes/spa';
 import { onboardingRouter } from './routes/onboarding';
 import { createAccountRouter } from './routes/account';
+import { workspacesRouter } from './routes/workspaces';
 import type { DeletionOptions } from './services/account';
 
 /** Postgres errors that reach the error handler (the routes handle the expected ones with specific messages). */
@@ -131,6 +132,7 @@ export function createApp(opts: AppOptions = {}) {
     affiliatesRouter, // affiliate program: /affiliation/…
     onboardingRouter, // welcome flow + "Bien démarrer" checklist: /onboarding
     createAccountRouter(opts.account), // Paramètres → Données et compte: /account/summary|export|reset|delete (owner only)
+    workspacesRouter, // several businesses per person: /workspaces (switcher, creation, renaming)
   );
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'Route introuvable' });
@@ -158,7 +160,7 @@ export function createApp(opts: AppOptions = {}) {
       return;
     }
     if (err instanceof HttpError) {
-      res.status(err.status).json({ error: err.message });
+      res.status(err.status).json(err.code ? { error: err.message, code: err.code } : { error: err.message });
       return;
     }
     const e = err as { type?: string; status?: number };

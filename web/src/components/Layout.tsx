@@ -7,6 +7,7 @@ import { eeWeb } from '../lib/ee';
 import { initials } from '../lib/format';
 import { onboardingApi } from '../lib/onboarding-api';
 import { Avatar, cx } from './ui';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
 const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: '/dashboard', label: 'Tableau de bord', icon: LayoutDashboard, end: true },
@@ -134,6 +135,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <div className="flex h-16 items-center px-4">
         <Logo dark />
       </div>
+      <WorkspaceSwitcher />
       <nav className="scalo-scroll-dark flex-1 space-y-0.5 overflow-y-auto px-2.5 py-3">
         {NAV.map((n) => (
           <NavLink

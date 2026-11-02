@@ -29,6 +29,17 @@ type Default<T> = ColumnType<T, T | undefined, T>;
 export type SendStatus = 'pending' | 'sending' | 'sent' | 'failed' | 'skipped';
 export type SendKind = 'broadcast' | 'campaign' | 'test' | 'confirmation' | 'order';
 
+/**
+ * 0017: the tenant. Every `user_id` column of the business tables references accounts(id). The account of a person
+ * has the id of the person; his other workspaces get ids from the users sequence (never the id of another person).
+ */
+export interface AccountsTable {
+  id: number;
+  owner_id: number;
+  name: string;
+  created_at: Timestamp;
+}
+
 export interface UsersTable {
   id: Id;
   email: string;
@@ -286,6 +297,8 @@ export interface OAuthAuthorizationRequestsTable {
   expires_at: Timestamp;
   consumed_at: NullableTimestamp;
   created_at: Timestamp;
+  /** 0017: workspace the authorization is bound to (the client asked for the MCP endpoint of that workspace). */
+  account_id: Default<number | null>;
 }
 
 export interface OAuthCodesTable {
@@ -296,6 +309,8 @@ export interface OAuthCodesTable {
   scopes: string[];
   code_challenge: string | null;
   family_id: string;
+  /** Grant covering every workspace this person may authorize (see migration 0018); null: `user_id` only. */
+  person_id: number | null;
   expires_at: Timestamp;
   used_at: NullableTimestamp;
   created_at: Timestamp;
@@ -309,6 +324,8 @@ export interface OAuthTokensTable {
   parent_id: number | null;
   client_id: number;
   user_id: number;
+  /** Grant covering every workspace this person may authorize (see migration 0018); null: `user_id` only. */
+  person_id: number | null;
   scopes: string[];
   expires_at: Timestamp;
   rotated_at: NullableTimestamp;
@@ -321,6 +338,9 @@ export interface OAuthTokensTable {
 export interface OAuthConsentsTable {
   user_id: number;
   client_id: number;
+  /** Grant covering every workspace this person may authorize (see migration 0018); null: `user_id` only. */
+  person_id: number | null;
+
   scopes: string[];
   created_at: Timestamp;
   updated_at: Timestamp;
@@ -963,6 +983,8 @@ export interface Database {
   affiliate_commissions: AffiliateCommissionsTable;
   // 0013 tables
   account_onboarding: AccountOnboardingTable;
+  // 0017 tables
+  accounts: AccountsTable;
   users: UsersTable;
   settings: SettingsTable;
   contacts: ContactsTable;

@@ -31,8 +31,10 @@ const hashToken = (t: string) => crypto.createHash('sha256').update(t).digest('h
 const inviteUrl = (token: string) => `${PUBLIC_URL}/invite/${token}`;
 
 /** Session user → account he works for (core hook). A member without the `team` license cannot sign in; the owner always can. */
-export async function resolveActor(userId: number): Promise<{ accountId: number; role: AccountRole } | null> {
-  const m = await db.selectFrom('account_members').select(['account_id', 'role']).where('user_id', '=', userId).executeTakeFirst();
+export async function resolveActor(userId: number, accountId?: number): Promise<{ accountId: number; role: AccountRole } | null> {
+  let q = db.selectFrom('account_members').select(['account_id', 'role']).where('user_id', '=', userId);
+  if (accountId !== undefined) q = q.where('account_id', '=', accountId);
+  const m = await q.orderBy('id').executeTakeFirst();
   if (!m) return null;
   if (!license.has('team')) throw new HttpError(403, TEAM_LICENSE_REQUIRED);
   return { accountId: m.account_id, role: m.role };
@@ -63,7 +65,7 @@ const publicInvitation = (i: { id: number; email: string; role: TeamInvitation['
 
 async function sendInvitation(accountId: number, email: string, role: TeamInvitation['role'], url: string): Promise<boolean> {
   try {
-    const [settings, account] = await Promise.all([getSettingsRow(accountId), db.selectFrom('users').select('name').where('id', '=', accountId).executeTakeFirst()]);
+    const [settings, account] = await Promise.all([getSettingsRow(accountId), db.selectFrom('accounts').select('name').where('id', '=', accountId).executeTakeFirst()]);
     const who = esc(account?.name || 'Un compte Scalo');
     const html = `<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#0f172a;max-width:520px;margin:0 auto;padding:24px">
 <p>Bonjour,</p>
@@ -87,7 +89,8 @@ teamRouter.get('/team', async (req, res) => {
   requireAdmin(req);
   const accountId = uid(req);
   const [owner, members, invitations] = await Promise.all([
-    db.selectFrom('users').select(['id', 'name', 'email']).where('id', '=', accountId).executeTakeFirstOrThrow(),
+    // the owner of the workspace (a person)
+    db.selectFrom('accounts as a').innerJoin('users as u', 'u.id', 'a.owner_id').select(['u.id', 'u.name', 'u.email']).where('a.id', '=', accountId).executeTakeFirstOrThrow(),
     db
       .selectFrom('account_members as m')
       .innerJoin('users as u', 'u.id', 'm.user_id')
@@ -199,8 +202,8 @@ const GONE = 'Cette invitation est introuvable, expirée ou déjà utilisée';
 teamPublicRouter.get('/invitations/:token', async (req, res) => {
   const inv = await db
     .selectFrom('account_invitations as i')
-    .innerJoin('users as u', 'u.id', 'i.account_id')
-    .select(['i.email', 'i.role', 'i.expires_at', 'u.name as account_name'])
+    .innerJoin('accounts as a', 'a.id', 'i.account_id')
+    .select(['i.email', 'i.role', 'i.expires_at', 'a.name as account_name'])
     .where('i.token_hash', '=', hashToken(String(req.params.token)))
     .where('i.accepted_at', 'is', null)
     .where('i.expires_at', '>', new Date().toISOString())

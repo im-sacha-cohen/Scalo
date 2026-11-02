@@ -85,6 +85,12 @@ export interface OAuthConsentRequest {
   redirect_uri: string;
   /** The user already granted these scopes (or more) and prompt=consent was not requested: the screen can be skipped. */
   remembered: boolean;
+  /** Workspace the access is for: imposed by the client (MCP endpoint of a workspace), or chosen on the screen. */
+  workspace: { id: number; name: string; locked: boolean };
+  /** Workspaces the person may grant access to (owner or administrator), when the client imposed none. */
+  workspaces: { id: number; name: string }[];
+  /** « Tous mes espaces » may be offered: several workspaces and none imposed by the client. */
+  can_grant_all: boolean;
   prompt_consent: boolean;
   expires_at: string;
 }
@@ -93,6 +99,8 @@ export interface OAuthConsentRequest {
 export interface OAuthAuthorization {
   client: { client_id: string; name: string; description: string; website: string | null; logo_url: string | null; owner_name: string | null };
   scopes: OAuthScope[];
+  /** Granted to every workspace of the person (the application names the workspace of each call). */
+  all_workspaces: boolean;
   granted_at: string;
   updated_at: string;
   last_used_at: string | null;

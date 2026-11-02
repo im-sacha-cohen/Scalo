@@ -61,7 +61,7 @@ export function ConnectedAppsCard() {
       ) : (
         <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
           {data.map((a) => (
-            <li key={a.client.client_id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start">
+            <li key={`${a.client.client_id}-${a.all_workspaces}`} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start">
               <AppLogo name={a.client.name} url={a.client.logo_url} size={40} />
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap items-center gap-x-2 text-sm font-medium text-slate-900">
@@ -76,6 +76,7 @@ export function ConnectedAppsCard() {
                   {a.client.owner_name && `Par ${a.client.owner_name} · `}autorisée le {fmtDate(a.granted_at)} · {a.last_used_at ? `utilisée ${fmtRelative(a.last_used_at)}` : 'jamais utilisée'}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-1.5">
+                  {a.all_workspaces && <Badge tone="brand">Tous vos espaces</Badge>}
                   {a.scopes.map((s) => (
                     <Badge key={s} tone={s === 'offline_access' ? 'amber' : 'slate'}>
                       {scopeLabel(s)}

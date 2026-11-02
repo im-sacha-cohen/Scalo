@@ -4,6 +4,11 @@
 export interface AccountDataSummary {
   /** Email of the account: the confirmation word of the deletions. */
   email: string;
+  /**
+   * The workspace concerned. `personal`: the first account of the person — deleting it deletes the person and his
+   * `others` workspaces too. Otherwise only this workspace is deleted.
+   */
+  workspace: { name: string; personal: boolean; others: number };
   counts: {
     contacts: number;
     tags: number;

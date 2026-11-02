@@ -76,9 +76,9 @@ export async function http<T = any>(
   ctx: TestCtx,
   method: string,
   path: string,
-  opts: { token?: string; json?: unknown; form?: Record<string, string>; cookies?: Record<string, string>; body?: string } = {},
+  opts: { token?: string; json?: unknown; form?: Record<string, string>; cookies?: Record<string, string>; body?: string; headers?: Record<string, string> } = {},
 ): Promise<Res<T>> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...opts.headers };
   let body: string | undefined = opts.body;
   if (opts.token) headers.authorization = `Bearer ${opts.token}`;
   if (opts.json !== undefined) {
@@ -111,14 +111,15 @@ export async function registerUser(ctx: TestCtx, name = 'Test') {
   return { token: r.body.token as string, user: r.body.user as { id: number; email: string }, email };
 }
 
-/** An authenticated client bound to one user. */
-export function client(ctx: TestCtx, token: string) {
+/** An authenticated client bound to one user (and to one of his workspaces: X-Scalo-Workspace). */
+export function client(ctx: TestCtx, token: string, workspace?: number) {
+  const headers = workspace ? { 'x-scalo-workspace': String(workspace) } : undefined;
   return {
-    get: <T = any>(p: string) => http<T>(ctx, 'GET', p, { token }),
-    post: <T = any>(p: string, json?: unknown) => http<T>(ctx, 'POST', p, { token, json: json ?? {} }),
-    patch: <T = any>(p: string, json: unknown) => http<T>(ctx, 'PATCH', p, { token, json }),
-    put: <T = any>(p: string, json: unknown) => http<T>(ctx, 'PUT', p, { token, json }),
-    del: <T = any>(p: string) => http<T>(ctx, 'DELETE', p, { token }),
+    get: <T = any>(p: string) => http<T>(ctx, 'GET', p, { token, headers }),
+    post: <T = any>(p: string, json?: unknown) => http<T>(ctx, 'POST', p, { token, json: json ?? {}, headers }),
+    patch: <T = any>(p: string, json: unknown) => http<T>(ctx, 'PATCH', p, { token, json, headers }),
+    put: <T = any>(p: string, json: unknown) => http<T>(ctx, 'PUT', p, { token, json, headers }),
+    del: <T = any>(p: string) => http<T>(ctx, 'DELETE', p, { token, headers }),
   };
 }
 

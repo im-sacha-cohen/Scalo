@@ -1,11 +1,12 @@
 // Paramètres → « Données et compte » : téléchargement des données (RGPD), suppression de toutes les données,
-// suppression du compte. Réservé au propriétaire du compte (l’API répond 403 à un membre d’équipe).
+// suppression du compte — de l’espace de travail courant (supprimer le premier espace d’une personne supprime son
+// compte et tous ses espaces). Réservé au propriétaire du compte (l’API répond 403 à un membre d’équipe).
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
 import { Archive, CircleAlert, Download, Eraser, Lock, ShieldAlert, Trash2, TriangleAlert, UserX } from 'lucide-react';
 import type { AccountDataSummary } from '@scalo/shared';
 import { accountApi, ACCOUNT_DELETED_FLAG } from '../../lib/account-api';
-import { downloadBlob } from '../../lib/api';
+import { downloadBlob, switchWorkspace } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useEdition } from '../../lib/edition';
 import { fmtNumber } from '../../lib/format';
@@ -56,7 +57,9 @@ function recap(c: Counts, mode: Mode): [string, number | string][] {
 
 export function AccountDataSection() {
   const toast = useToast();
-  const { role } = useEdition();
+  const { role, info } = useEdition();
+  // a workspace other than the person's first one: deleting it keeps the person and his other workspaces
+  const workspace = info && info.account.id !== info.actor.id ? info.account.name : null;
   const [exporting, setExporting] = useState(false);
   const [mode, setMode] = useState<Mode | null>(null);
 
@@ -120,13 +123,15 @@ export function AccountDataSection() {
           </div>
           <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-ink">Supprimer le compte</p>
+              <p className="text-sm font-semibold text-ink">{workspace ? `Supprimer l’espace « ${workspace} »` : 'Supprimer le compte'}</p>
               <p className="mt-1 text-sm text-slate-600">
-                Toutes les données, les réglages, les applications connectées, l’équipe et vos accès. Vos pages publiques, espaces membres et affiliés et domaines personnalisés cesseront de répondre.
+                {workspace
+                  ? 'Toutes les données et les réglages de cet espace, ses applications connectées et son équipe. Ses pages publiques, espaces membres et affiliés et domaines personnalisés cesseront de répondre. Vos autres espaces ne sont pas touchés.'
+                  : 'Toutes les données, les réglages, les applications connectées, l’équipe et vos accès — ainsi que vos autres espaces de travail. Vos pages publiques, espaces membres et affiliés et domaines personnalisés cesseront de répondre.'}
               </p>
             </div>
             <Button variant="danger" icon={UserX} className="sm:mt-0.5" onClick={() => setMode('delete')}>
-              Supprimer le compte…
+              {workspace ? 'Supprimer l’espace…' : 'Supprimer le compte…'}
             </Button>
           </div>
         </div>
@@ -140,7 +145,7 @@ export function AccountDataSection() {
 function DeletionModal({ mode, onClose, onExport, exporting }: { mode: Mode | null; onClose: () => void; onExport: () => void; exporting: boolean }) {
   const toast = useToast();
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const [summary, setSummary] = useState<AccountDataSummary | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [password, setPassword] = useState('');
@@ -167,6 +172,9 @@ function DeletionModal({ mode, onClose, onExport, exporting }: { mode: Mode | nu
 
   const matches = !!summary && confirm.trim().toLowerCase() === summary.email.toLowerCase();
   const isDelete = mode === 'delete';
+  /** Deleting a workspace that is not the person's first one: the person stays signed in. */
+  const onlyWorkspace = !!summary && !summary.workspace.personal;
+  const others = summary?.workspace.personal ? summary.workspace.others : 0;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -181,6 +189,11 @@ function DeletionModal({ mode, onClose, onExport, exporting }: { mode: Mode | nu
         navigate('/dashboard');
       } else {
         await accountApi.deleteAccount({ password, confirm: confirm.trim() });
+        if (onlyWorkspace && user) {
+          toast.success(`Espace « ${summary!.workspace.name} » supprimé`);
+          switchWorkspace(user.id, '/dashboard'); // back to the person's first workspace
+          return;
+        }
         try {
           sessionStorage.setItem(ACCOUNT_DELETED_FLAG, '1');
         } catch {
@@ -202,15 +215,21 @@ function DeletionModal({ mode, onClose, onExport, exporting }: { mode: Mode | nu
       open={!!mode}
       onClose={busy ? () => undefined : onClose}
       size="lg"
-      title={isDelete ? 'Supprimer définitivement le compte ?' : 'Supprimer toutes les données ?'}
-      description={isDelete ? 'Le compte, ses données et ses réglages seront effacés. Cette action est irréversible.' : 'Le compte reste ouvert mais sera vide. Cette action est irréversible.'}
+      title={isDelete ? (onlyWorkspace ? `Supprimer définitivement l’espace « ${summary!.workspace.name} » ?` : 'Supprimer définitivement le compte ?') : 'Supprimer toutes les données ?'}
+      description={
+        isDelete
+          ? onlyWorkspace
+            ? 'L’espace, ses données et ses réglages seront effacés ; votre compte et vos autres espaces restent. Cette action est irréversible.'
+            : `Le compte, ses données et ses réglages seront effacés${others > 0 ? `, ainsi que vos ${others} autre${others > 1 ? 's' : ''} espace${others > 1 ? 's' : ''} de travail et leurs données` : ''}. Cette action est irréversible.`
+          : 'Le compte reste ouvert mais sera vide. Cette action est irréversible.'
+      }
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={busy}>
             Annuler
           </Button>
           <Button type="submit" form="account-deletion-form" variant="danger" icon={isDelete ? UserX : Trash2} loading={busy} disabled={!matches || !password}>
-            {isDelete ? 'Supprimer le compte' : 'Supprimer toutes les données'}
+            {isDelete ? (onlyWorkspace ? 'Supprimer l’espace' : 'Supprimer le compte') : 'Supprimer toutes les données'}
           </Button>
         </>
       }

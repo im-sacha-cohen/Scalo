@@ -35,6 +35,7 @@ import {
   type IssuedTokens,
 } from '../services/oauth-server';
 import { clientIp } from './auth';
+import { workspaceOfResource } from './mcp';
 
 type OAuthErrorCode =
   | 'invalid_request'
@@ -47,7 +48,8 @@ type OAuthErrorCode =
   | 'access_denied'
   | 'server_error'
   | 'invalid_redirect_uri'
-  | 'invalid_client_metadata';
+  | 'invalid_client_metadata'
+  | 'invalid_target';
 
 class OAuthError extends Error {
   constructor(public code: OAuthErrorCode, public description: string, public status = code === 'invalid_client' ? 401 : 400) {
@@ -242,6 +244,12 @@ export function createOAuthRouter() {
       const challenge = param(q, 'code_challenge');
       const method = param(q, 'code_challenge_method');
       const prompt = param(q, 'prompt');
+      // RFC 8707: the MCP endpoint of a workspace binds the authorization to it (other resources: not restricted)
+      const resource = param(q, 'resource');
+      const workspace = resource ? workspaceOfResource(resource) : null;
+      if (workspace !== null && !(await db.selectFrom('accounts').select('id').where('id', '=', workspace).executeTakeFirst())) {
+        return fail('invalid_target', 'Espace de travail inconnu : vérifiez l’adresse du serveur MCP');
+      }
       if (!responseType) return fail('invalid_request', 'response_type manquant');
       if (responseType !== 'code') return fail('unsupported_response_type', 'Seul response_type=code est pris en charge');
       // a self-registered client may leave the scope out: the consent screen lists everything it would get
@@ -268,6 +276,7 @@ export function createOAuthRouter() {
           code_challenge: challenge ?? null,
           code_challenge_method: challenge ? 'S256' : null,
           prompt_consent: (prompt ?? '').split(' ').includes('consent'),
+          account_id: workspace,
           expires_at: new Date(Date.now() + REQUEST_TTL_S * 1000),
         })
         .execute();
@@ -391,7 +400,8 @@ export function createOAuthRouter() {
       if (!token) throw new OAuthError('invalid_request', 'Paramètre token manquant');
       const row = await db
         .selectFrom('oauth_tokens as t')
-        .innerJoin('users as u', 'u.id', 't.user_id')
+        .innerJoin('accounts as a', 'a.id', 't.user_id')
+        .innerJoin('users as u', 'u.id', 'a.owner_id')
         .select(['t.type', 't.client_id', 't.scopes', 't.expires_at', 't.created_at', 't.revoked_at', 't.rotated_at', 't.user_id', 'u.email'])
         .where('t.token_hash', '=', sha256(token))
         .executeTakeFirst();
@@ -453,7 +463,7 @@ async function authorizationCodeGrant(req: Request, client: OAuthClientRow): Pro
     }
     const scopes = intersect(row.scopes, client.scopes);
     if (!scopes.length) return { error: new OAuthError('invalid_scope', 'Les scopes accordés ne sont plus autorisés pour cette application') };
-    return { tokens: await issueTokens(trx, { clientId: client.id, userId: row.user_id, familyId: row.family_id, scopes }) };
+    return { tokens: await issueTokens(trx, { clientId: client.id, userId: row.user_id, personId: row.person_id, familyId: row.family_id, scopes }) };
   });
   if ('error' in result) throw result.error;
   return result.tokens;
@@ -495,7 +505,7 @@ async function refreshTokenGrant(req: Request, client: OAuthClientRow): Promise<
     if (!scopes.length) return { error: new OAuthError('invalid_scope', 'Aucun scope autorisé') };
     await trx.updateTable('oauth_tokens').set({ rotated_at: sql`now()` }).where('id', '=', row.id).execute();
     return {
-      tokens: await issueTokens(trx, { clientId: client.id, userId: row.user_id, familyId: row.family_id, scopes, refreshScopes, parentId: row.id }),
+      tokens: await issueTokens(trx, { clientId: client.id, userId: row.user_id, personId: row.person_id, familyId: row.family_id, scopes, refreshScopes, parentId: row.id }),
     };
   });
   if ('error' in result) throw result.error;

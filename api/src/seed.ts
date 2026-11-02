@@ -48,6 +48,7 @@ async function main() {
       .values({ email: DEMO_EMAIL, password_hash: hash, name: 'Camille Martin', created_at: iso(now - 40 * DAY) })
       .returning('id')
       .executeTakeFirstOrThrow();
+    await trx.insertInto('accounts').values({ id: userId, owner_id: userId, name: 'Business Facile' }).execute();
     await trx
       .insertInto('settings')
       .values({

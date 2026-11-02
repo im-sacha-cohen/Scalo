@@ -4,10 +4,12 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { OnboardingState } from '@scalo/shared';
+import { sql } from 'kysely';
 import { roleAllows } from '../src/access';
 import { db } from '../src/db';
 import { migrateToLatest, migrator } from '../src/db/migrate';
 import { CHECKLISTS, markOnboardingDone, onboardingState } from '../src/services/onboarding';
+import { signToken } from '../src/util';
 import { client, http, registerUser, shutdown, startApp, type TestCtx } from './helpers';
 
 let ctx: TestCtx;
@@ -63,7 +65,9 @@ describe('welcome flow', () => {
 
   test('accounts that exist when the migration runs are never sent to the welcome flow', async () => {
     await migrator().migrateTo('0012_affiliates');
-    const old = await account(); // created before 0013: no onboarding table yet
+    // created before 0013 (no onboarding table yet), in SQL: the code of today expects the schema of today
+    const { rows } = await sql<{ id: number }>`INSERT INTO users (email, password_hash, name) VALUES (${`old-${Date.now()}@test.local`}, 'x', 'Ancien') RETURNING id`.execute(db);
+    const old = { api: client(ctx, signToken(rows[0].id)) };
     // 0013 and the migrations added after it
     const later = (await migrator().getMigrations()).filter((m) => m.name > '0012_affiliates').length;
     assert.ok(later >= 1);

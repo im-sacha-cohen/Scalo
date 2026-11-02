@@ -15,3 +15,4 @@ export * from './affiliates';
 export * from './onboarding';
 export * from './account';
 export * from './kits';
+export * from './workspaces';

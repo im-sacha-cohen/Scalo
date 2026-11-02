@@ -42,7 +42,7 @@ export const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$/;
 export async function getArea(userId: number): Promise<AreaRow> {
   const found = await db.selectFrom('member_areas').selectAll().where('user_id', '=', userId).executeTakeFirst();
   if (found) return found;
-  const user = await db.selectFrom('users').select(['name']).where('id', '=', userId).executeTakeFirstOrThrow();
+  const user = await db.selectFrom('accounts').select(['name']).where('id', '=', userId).executeTakeFirstOrThrow();
   const base = slugify(user.name, 'espace').slice(0, 48).replace(/-+$/g, '') || 'espace';
   for (let i = 0; i < 100; i++) {
     const slug = i === 0 ? base : i < 50 ? `${base}-${i + 1}` : `${base}-${crypto.randomBytes(4).toString('hex')}`;

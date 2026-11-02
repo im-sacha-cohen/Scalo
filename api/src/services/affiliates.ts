@@ -67,7 +67,7 @@ export const programUrl = (p: Pick<ProgramRow, 'slug'>) => `${PUBLIC_URL}${progr
 export async function getProgram(userId: number, ex: Db = db): Promise<ProgramRow> {
   const found = await ex.selectFrom('affiliate_programs').selectAll().where('user_id', '=', userId).executeTakeFirst();
   if (found) return found;
-  const user = await ex.selectFrom('users').select(['name']).where('id', '=', userId).executeTakeFirstOrThrow();
+  const user = await ex.selectFrom('accounts').select(['name']).where('id', '=', userId).executeTakeFirstOrThrow();
   const base = slugify(user.name, 'partenaires').slice(0, 48).replace(/-+$/g, '') || 'partenaires';
   for (let i = 0; i < 100; i++) {
     const slug = i === 0 ? base : i < 50 ? `${base}-${i + 1}` : `${base}-${crypto.randomBytes(4).toString('hex')}`;
