@@ -5,8 +5,8 @@ import { Card } from '../../components/ui';
 import { CodeBlock, CopyValue } from '../oauth/common';
 import { C, Fact, Method, Note, ORIGIN, Scope, Section, Steps } from './doc-ui';
 
-type Route = [method: string, path: string, what: string, scope: string, body?: string];
-const API_GROUPS: { title: string; routes: Route[] }[] = [
+export type Route = [method: string, path: string, what: string, scope: string, body?: string];
+export const API_GROUPS: { title: string; routes: Route[] }[] = [
   { title: 'Compte', routes: [['GET', '/me', 'Compte connecté', 'profile']] },
   {
     title: 'Contacts',
@@ -60,7 +60,15 @@ const API_GROUPS: { title: string; routes: Route[] }[] = [
   },
 ];
 
-const ERRORS: [string, string][] = [
+export const OAUTH_ENDPOINTS: [string, string][] = [
+  ['GET /oauth/authorize', 'Écran d’autorisation.'],
+  ['POST /oauth/token', 'Jetons : authorization_code ou refresh_token.'],
+  ['POST /oauth/revoke', 'Révoquer un jeton (RFC 7009).'],
+  ['POST /oauth/introspect', 'Inspecter un jeton (RFC 7662, applications confidentielles).'],
+  ['GET /.well-known/oauth-authorization-server', 'Métadonnées du serveur (RFC 8414).'],
+];
+
+export const ERRORS: [string, string][] = [
   ['400 invalid_request', 'Paramètre manquant ou invalide.'],
   ['401 invalid_token', 'Jeton absent, expiré ou révoqué.'],
   ['403 insufficient_scope', 'Le jeton n’a pas le scope requis (indiqué dans le champ scope).'],
@@ -220,15 +228,7 @@ export function OAuthDocs() {
           </>
         }
       >
-        <Table
-          rows={[
-            ['GET /oauth/authorize', 'Écran d’autorisation.'],
-            ['POST /oauth/token', 'Jetons : authorization_code ou refresh_token.'],
-            ['POST /oauth/revoke', 'Révoquer un jeton (RFC 7009).'],
-            ['POST /oauth/introspect', 'Inspecter un jeton (RFC 7662, applications confidentielles).'],
-            ['GET /.well-known/oauth-authorization-server', 'Métadonnées du serveur (RFC 8414).'],
-          ]}
-        />
+        <Table rows={OAUTH_ENDPOINTS} />
       </Section>
 
       <Section title="Scopes" description="Demandez seulement ce dont votre application a besoin : l’utilisateur voit chaque droit avant d’accepter.">

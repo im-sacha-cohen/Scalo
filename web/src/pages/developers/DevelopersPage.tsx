@@ -2,9 +2,10 @@
 // by the user on the authorization server. The tab lives in the URL (?tab=) so it can be linked.
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { Blocks, Braces, ChevronRight, KeyRound, Plug, Plus } from 'lucide-react';
+import { Blocks, Braces, ChevronRight, Copy, Download, KeyRound, Plug, Plus } from 'lucide-react';
 import { api } from '../../lib/api';
-import { useLoad } from '../../lib/hooks';
+import { copyText, useLoad } from '../../lib/hooks';
+import { useEdition } from '../../lib/edition';
 import { fmtDate } from '../../lib/format';
 import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, PageLoader, Tabs } from '../../components/ui';
 import { Modal } from '../../components/Modal';
@@ -14,6 +15,8 @@ import { AppForm, emptyApp } from './AppForm';
 import { ApiDocs, OAuthDocs } from './Docs';
 import { McpDocs } from './McpDocs';
 import { SecretModal } from './SecretModal';
+import { ORIGIN } from './doc-ui';
+import { developerDocsMarkdown } from './docs-markdown';
 
 const TABS = ['mcp', 'api', 'oauth', 'apps'] as const;
 type Tab = (typeof TABS)[number];
@@ -27,6 +30,20 @@ export function DevelopersPage() {
   const [params, setParams] = useSearchParams();
   const tab = (TABS.some((t) => t === params.get('tab')) ? params.get('tab') : 'mcp') as Tab;
   const setTab = (t: Tab) => setParams(t === 'mcp' ? {} : { tab: t }, { replace: true });
+  const account = useEdition().info?.account;
+  // the whole documentation in one Markdown file, for an agent that is not connected to Scalo
+  const markdown = () => developerDocsMarkdown(ORIGIN, account ? { id: account.id, name: account.name } : undefined);
+  const copyDocs = async () => {
+    if (await copyText(markdown())) toast.success('Documentation copiée (Markdown)');
+    else toast.error('Copie impossible : téléchargez le fichier');
+  };
+  const downloadDocs = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([markdown()], { type: 'text/markdown;charset=utf-8' }));
+    a.download = 'scalo-documentation.md';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
 
   if (loading && !data) return <PageLoader />;
   if (error && !data) return <ErrorState message={error} onRetry={reload} />;
@@ -38,11 +55,19 @@ export function DevelopersPage() {
         title="Développeurs"
         description="Branchez vos outils sur Scalo : un client MCP en collant une URL, ou votre propre code avec l’API REST."
         actions={
-          tab === 'apps' && apps.length > 0 ? (
-            <Button icon={Plus} onClick={() => setCreating(true)}>
-              Nouvelle application
+          <>
+            <Button variant="secondary" icon={Copy} onClick={copyDocs}>
+              Copier la doc
             </Button>
-          ) : undefined
+            <Button variant="secondary" icon={Download} onClick={downloadDocs}>
+              Télécharger (.md)
+            </Button>
+            {tab === 'apps' && apps.length > 0 && (
+              <Button icon={Plus} onClick={() => setCreating(true)}>
+                Nouvelle application
+              </Button>
+            )}
+          </>
         }
       />
 

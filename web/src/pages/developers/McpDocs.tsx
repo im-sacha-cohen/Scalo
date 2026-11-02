@@ -13,8 +13,8 @@ import { C, Fact, Note, ORIGIN, Scope, Section, Steps } from './doc-ui';
 
 const ALL_URL = `${ORIGIN}/mcp`;
 
-type Tool = [name: string, what: string, scope: OAuthScope];
-const GROUPS: { icon: LucideIcon; title: string; tools: Tool[] }[] = [
+export type Tool = [name: string, what: string, scope: OAuthScope];
+export const MCP_TOOL_GROUPS: { icon: LucideIcon; title: string; tools: Tool[] }[] = [
   {
     icon: Users,
     title: 'Contacts',
@@ -73,7 +73,7 @@ const GROUPS: { icon: LucideIcon; title: string; tools: Tool[] }[] = [
   },
 ];
 
-const TOOL_COUNT = GROUPS.reduce((n, g) => n + g.tools.length, 0);
+const TOOL_COUNT = MCP_TOOL_GROUPS.reduce((n, g) => n + g.tools.length, 0);
 
 export function McpDocs({ onCreateApp }: { onCreateApp: () => void }) {
   const account = useEdition().info?.account;
@@ -197,7 +197,7 @@ export function McpDocs({ onCreateApp }: { onCreateApp: () => void }) {
 
       <Section title="Outils disponibles" description="Chaque outil demande un scope : le client n’obtient que ceux que vous acceptez sur l’écran d’autorisation.">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {GROUPS.map((g) => (
+          {MCP_TOOL_GROUPS.map((g) => (
             <div key={g.title} className="rounded-2xl border border-slate-200/80 bg-white p-4">
               <p className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
                 <g.icon size={15} className="text-slate-400" /> {g.title}
